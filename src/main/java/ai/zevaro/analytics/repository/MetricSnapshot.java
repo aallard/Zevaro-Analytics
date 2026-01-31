@@ -15,7 +15,11 @@ import java.util.UUID;
 @Table(name = "metric_snapshots", schema = "analytics",
     uniqueConstraints = @UniqueConstraint(
         columnNames = {"tenant_id", "metric_type", "metric_date"}
-    ))
+    ),
+    indexes = {
+        @Index(name = "idx_metric_tenant_type_date",
+               columnList = "tenant_id, metric_type, metric_date")
+    })
 @Getter @Setter
 @NoArgsConstructor @AllArgsConstructor
 @Builder

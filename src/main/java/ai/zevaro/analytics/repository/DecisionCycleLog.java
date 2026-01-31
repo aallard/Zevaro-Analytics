@@ -8,7 +8,11 @@ import java.time.Instant;
 import java.util.UUID;
 
 @Entity
-@Table(name = "decision_cycle_log", schema = "analytics")
+@Table(name = "decision_cycle_log", schema = "analytics",
+    indexes = {
+        @Index(name = "idx_cycle_tenant_resolved", columnList = "tenant_id, resolved_at"),
+        @Index(name = "idx_cycle_stakeholder", columnList = "stakeholder_id")
+    })
 @Getter @Setter
 @NoArgsConstructor @AllArgsConstructor
 @Builder

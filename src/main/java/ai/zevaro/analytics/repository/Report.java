@@ -11,7 +11,11 @@ import java.util.Map;
 import java.util.UUID;
 
 @Entity
-@Table(name = "reports", schema = "analytics")
+@Table(name = "reports", schema = "analytics",
+    indexes = {
+        @Index(name = "idx_reports_tenant_type",
+               columnList = "tenant_id, report_type, period_start, period_end")
+    })
 @Getter @Setter
 @NoArgsConstructor @AllArgsConstructor
 @Builder

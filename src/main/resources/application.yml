@@ -4,21 +4,28 @@ server:
 spring:
   application:
     name: zevaro-analytics
+
   datasource:
-    url: jdbc:postgresql://${DB_HOST:localhost}:5432/zevaro
+    url: jdbc:postgresql://${DB_HOST:localhost}:5432/${DB_NAME:zevaro}
     username: ${DB_USER:zevaro}
     password: ${DB_PASSWORD:zevaro}
+    driver-class-name: org.postgresql.Driver
+
   jpa:
     hibernate:
-      ddl-auto: ${DDL_AUTO:update}
+      ddl-auto: update
     properties:
       hibernate:
-        default_schema: analytics
         dialect: org.hibernate.dialect.PostgreSQLDialect
+        default_schema: analytics
+        format_sql: true
+    show-sql: ${SHOW_SQL:false}
     open-in-view: false
+
   redis:
     host: ${REDIS_HOST:localhost}
     port: ${REDIS_PORT:6379}
+
   kafka:
     bootstrap-servers: ${KAFKA_SERVERS:localhost:9092}
     consumer:
