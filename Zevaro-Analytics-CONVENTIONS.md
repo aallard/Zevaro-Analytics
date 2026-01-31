@@ -420,3 +420,119 @@ curl http://localhost:8081/actuator/health
 - [ ] Include in dashboard if relevant
 - [ ] Add to weekly digest report
 - [ ] Committed immediately after working
+
+---
+
+## Kafka Integration Requirements
+
+> **CRITICAL:** These settings are MANDATORY. A 278GB log file incident occurred due to improper Kafka configuration.
+
+### The 278GB Log Incident (January 2026)
+
+**Root Cause:** When Kafka is unavailable, Spring Kafka's default retry settings (50ms backoff) combined with multiple consumer threads created a log flooding scenario:
+- 3 Kafka listeners × 3 concurrent threads = 9 retry loops
+- Each loop logging at 50ms intervals = ~180 log entries/second
+- Result: 278GB log file in hours, disk full, service crash
+
+### Mandatory Consumer Settings
+
+```yaml
+spring:
+  kafka:
+    enabled: ${KAFKA_ENABLED:true}
+    consumer:
+      properties:
+        reconnect.backoff.ms: 1000        # 1 second (NOT default 50ms)
+        reconnect.backoff.max.ms: 60000   # 60 seconds max
+        retry.backoff.ms: 1000
+    listener:
+      concurrency: 1  # CRITICAL: Reduced from 3 to prevent 9 retry loops
+```
+
+### KafkaConsumerConfig Requirements
+
+```java
+@Configuration
+@EnableKafka
+@ConditionalOnProperty(name = "spring.kafka.enabled", havingValue = "true", matchIfMissing = true)
+public class KafkaConsumerConfig {
+    // Defensive settings in consumerConfigs():
+    // - RECONNECT_BACKOFF_MS_CONFIG = 1000
+    // - RECONNECT_BACKOFF_MAX_MS_CONFIG = 60000
+    //
+    // Error handler with exponential backoff:
+    // factory.setCommonErrorHandler(new DefaultErrorHandler(
+    //     new ExponentialBackOff(1000L, 2.0)  // 1s, 2s, 4s, 8s...
+    // ));
+}
+```
+
+### @KafkaListener Error Handling
+
+**CRITICAL:** All @KafkaListener methods must have try-catch:
+
+```java
+@KafkaListener(topics = "zevaro.core.decision.resolved")
+public void onDecisionResolved(DecisionResolvedEvent event) {
+    try {
+        // Process event
+    } catch (DataIntegrityViolationException e) {
+        log.warn("Duplicate event ignored: {}", event.decisionId());
+    } catch (DataAccessException e) {
+        log.error("Database error processing decision event: {}", e.getMessage());
+        throw e;  // Rethrow for retry
+    } catch (Exception e) {
+        log.error("Unexpected error processing decision event: {}", e.getMessage(), e);
+        // Don't rethrow - prevents infinite retry loops
+    }
+}
+```
+
+### Logback Configuration (MANDATORY)
+
+```xml
+<!-- Separate Kafka log file with strict size limits -->
+<appender name="KAFKA_RATE_LIMITED" class="ch.qos.logback.core.rolling.RollingFileAppender">
+    <file>${LOG_FILE}-kafka.log</file>
+    <rollingPolicy class="ch.qos.logback.core.rolling.SizeAndTimeBasedRollingPolicy">
+        <maxFileSize>10MB</maxFileSize>
+        <maxHistory>3</maxHistory>
+        <totalSizeCap>50MB</totalSizeCap>
+    </rollingPolicy>
+    <filter class="ch.qos.logback.classic.filter.ThresholdFilter">
+        <level>WARN</level>
+    </filter>
+</appender>
+
+<!-- Kafka client loggers - ERROR only, separate file -->
+<logger name="org.apache.kafka" level="ERROR" additivity="false">
+    <appender-ref ref="KAFKA_RATE_LIMITED"/>
+</logger>
+```
+
+### KAFKA_ENABLED Toggle
+
+For local development without Kafka:
+
+```bash
+export KAFKA_ENABLED=false
+./mvnw spring-boot:run
+```
+
+When disabled, @ConditionalOnProperty prevents KafkaConsumerConfig bean creation.
+
+### KafkaHealthIndicator
+
+The service includes a KafkaHealthIndicator that:
+- Tracks consecutive failures
+- Rate-limits logging (max 1 log per minute when failing)
+- Logs recovery when Kafka becomes available
+
+### Checklist for Kafka Changes
+
+- [ ] Verify reconnect.backoff.ms >= 1000 (NOT 50ms default)
+- [ ] Verify listener concurrency = 1
+- [ ] All @KafkaListener methods have try-catch
+- [ ] Confirm logback-spring.xml has separate Kafka appender
+- [ ] Test with Kafka DOWN before deploying
+- [ ] Check KafkaHealthIndicator status in /actuator/health
