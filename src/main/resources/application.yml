@@ -27,14 +27,33 @@ spring:
     port: ${REDIS_PORT:6379}
 
   kafka:
+    # Environment toggle - set to false for local dev without Kafka
+    enabled: ${KAFKA_ENABLED:true}
+
     bootstrap-servers: ${KAFKA_SERVERS:localhost:9092}
+
     consumer:
       group-id: zevaro-analytics
       auto-offset-reset: earliest
       key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
       value-deserializer: org.springframework.kafka.support.serializer.JsonDeserializer
+
+      # DEFENSIVE: Prevent log flooding on connection failures
       properties:
         spring.json.trusted.packages: ai.zevaro.*
+        # Connection backoff (default is 50ms - way too aggressive)
+        reconnect.backoff.ms: 1000
+        reconnect.backoff.max.ms: 60000
+        # Session/heartbeat - fail fast but don't spam
+        session.timeout.ms: 30000
+        heartbeat.interval.ms: 10000
+        request.timeout.ms: 40000
+        # Retry backoff
+        retry.backoff.ms: 1000
+
+    listener:
+      # Don't auto-start if explicitly disabled
+      auto-startup: ${KAFKA_AUTO_STARTUP:true}
 
 management:
   endpoints:
