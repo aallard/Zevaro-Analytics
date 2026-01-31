@@ -14,6 +14,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneOffset;
+import java.util.HashMap;
 import java.util.Map;
 import java.util.UUID;
 
@@ -90,6 +91,58 @@ public class MetricsService {
         }
 
         log.debug("Recorded outcome validation: {}", outcomeId);
+    }
+
+    @Transactional
+    @CacheEvict(value = AppConstants.CACHE_DASHBOARD, key = "#tenantId")
+    public void recordHypothesisConcluded(
+            UUID tenantId,
+            UUID hypothesisId,
+            UUID outcomeId,
+            String result,  // VALIDATED or INVALIDATED
+            Instant createdAt,
+            Instant concludedAt) {
+
+        var today = concludedAt.atZone(ZoneOffset.UTC).toLocalDate();
+        var existing = snapshotRepository.findByTenantIdAndMetricTypeAndMetricDate(
+            tenantId, AppConstants.METRIC_HYPOTHESIS_THROUGHPUT, today);
+
+        if (existing.isPresent()) {
+            var snapshot = existing.get();
+            snapshot.setValue(snapshot.getValue().add(BigDecimal.ONE));
+
+            // Update dimensions
+            var dims = snapshot.getDimensions() != null
+                ? new HashMap<>(snapshot.getDimensions())
+                : new HashMap<String, Object>();
+
+            int validated = ((Number) dims.getOrDefault("validated", 0)).intValue();
+            int invalidated = ((Number) dims.getOrDefault("invalidated", 0)).intValue();
+
+            if ("VALIDATED".equals(result)) {
+                dims.put("validated", validated + 1);
+            } else {
+                dims.put("invalidated", invalidated + 1);
+            }
+
+            snapshot.setDimensions(dims);
+            snapshotRepository.save(snapshot);
+        } else {
+            var dims = new HashMap<String, Object>();
+            dims.put("validated", "VALIDATED".equals(result) ? 1 : 0);
+            dims.put("invalidated", "INVALIDATED".equals(result) ? 1 : 0);
+
+            var snapshot = MetricSnapshot.builder()
+                .tenantId(tenantId)
+                .metricType(AppConstants.METRIC_HYPOTHESIS_THROUGHPUT)
+                .metricDate(today)
+                .value(BigDecimal.ONE)
+                .dimensions(dims)
+                .build();
+            snapshotRepository.save(snapshot);
+        }
+
+        log.debug("Recorded hypothesis conclusion: {} - {}", hypothesisId, result);
     }
 
     private void updateDailySnapshot(UUID tenantId, LocalDate date) {

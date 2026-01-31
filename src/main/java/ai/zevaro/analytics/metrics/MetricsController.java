@@ -2,6 +2,7 @@ package ai.zevaro.analytics.metrics;
 
 import ai.zevaro.analytics.config.AppConstants;
 import ai.zevaro.analytics.metrics.dto.DecisionVelocityMetric;
+import ai.zevaro.analytics.metrics.dto.HypothesisThroughputMetric;
 import ai.zevaro.analytics.metrics.dto.StakeholderResponseMetric;
 import ai.zevaro.analytics.repository.DecisionCycleLogRepository;
 import ai.zevaro.analytics.repository.MetricSnapshotRepository;
@@ -107,6 +108,55 @@ public class MetricsController {
             "totalValidated", totalValidated,
             "periodDays", days,
             "dataPoints", dataPoints
+        ));
+    }
+
+    @GetMapping("/hypothesis-throughput")
+    @Cacheable(value = AppConstants.CACHE_METRICS, key = "'ht:' + #tenantId + ':' + #days")
+    public ResponseEntity<List<HypothesisThroughputMetric>> getHypothesisThroughput(
+            @RequestHeader("X-Tenant-Id") UUID tenantId,
+            @RequestParam(defaultValue = "30") int days) {
+
+        var endDate = LocalDate.now();
+        var startDate = endDate.minusDays(days);
+
+        var snapshots = snapshotRepository
+            .findByTenantIdAndMetricTypeAndMetricDateBetweenOrderByMetricDateAsc(
+                tenantId, AppConstants.METRIC_HYPOTHESIS_THROUGHPUT, startDate, endDate);
+
+        var metrics = snapshots.stream()
+            .map(s -> {
+                int validated = getIntDimension(s.getDimensions(), "validated");
+                int invalidated = getIntDimension(s.getDimensions(), "invalidated");
+                int total = validated + invalidated;
+                double rate = total > 0 ? (double) validated / total : 0.0;
+
+                return new HypothesisThroughputMetric(
+                    tenantId,
+                    s.getMetricDate(),
+                    total,
+                    validated,
+                    invalidated,
+                    rate
+                );
+            })
+            .toList();
+
+        return ResponseEntity.ok(metrics);
+    }
+
+    @GetMapping("/pipeline-idle-time")
+    @Cacheable(value = AppConstants.CACHE_METRICS, key = "'pit:' + #tenantId")
+    public ResponseEntity<Map<String, Object>> getPipelineIdleTime(
+            @RequestHeader("X-Tenant-Id") UUID tenantId) {
+
+        // This would integrate with deployment tracking
+        // For now, return structure
+        return ResponseEntity.ok(Map.of(
+            "idleTimeMinutes", 0,
+            "lastDecisionResolved", Instant.now(),
+            "pendingDecisions", 0,
+            "status", "UNKNOWN"
         ));
     }
 
