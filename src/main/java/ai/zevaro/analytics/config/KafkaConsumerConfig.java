@@ -14,7 +14,10 @@ import org.springframework.kafka.core.DefaultKafkaConsumerFactory;
 import org.springframework.kafka.listener.CommonErrorHandler;
 import org.springframework.kafka.listener.DefaultErrorHandler;
 import org.springframework.kafka.support.serializer.JsonDeserializer;
-import org.springframework.util.backoff.ExponentialBackOff;
+import org.springframework.kafka.support.serializer.DeserializationException;
+import org.springframework.util.backoff.FixedBackOff;
+import com.fasterxml.jackson.core.JsonParseException;
+import com.fasterxml.jackson.databind.JsonMappingException;
 
 import java.util.HashMap;
 import java.util.Map;
@@ -85,15 +88,20 @@ public class KafkaConsumerConfig {
 
     @Bean
     public CommonErrorHandler kafkaErrorHandler() {
-        // Exponential backoff: 1s initial, 2x multiplier, 60s max
-        ExponentialBackOff backOff = new ExponentialBackOff(1000L, 2.0);
-        backOff.setMaxInterval(60000L);
-        backOff.setMaxElapsedTime(180000L); // Give up after 3 minutes of retries
+        // Fixed backoff: 3 retries with 5 second intervals, then give up
+        FixedBackOff backOff = new FixedBackOff(5000L, 3L);
 
         DefaultErrorHandler errorHandler = new DefaultErrorHandler((record, exception) -> {
-            log.error("Kafka consumer error after retries exhausted. Topic: {}, Partition: {}, Offset: {}. Error: {}",
+            log.error("Kafka message DROPPED after retries. Topic: {}, Partition: {}, Offset: {}. Error: {}",
                 record.topic(), record.partition(), record.offset(), exception.getMessage());
         }, backOff);
+
+        // CRITICAL: Do NOT retry deserialization errors - they will never succeed
+        errorHandler.addNotRetryableExceptions(
+            DeserializationException.class,
+            JsonParseException.class,
+            JsonMappingException.class
+        );
 
         return errorHandler;
     }
