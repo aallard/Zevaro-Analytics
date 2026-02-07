@@ -145,6 +145,45 @@ public class MetricsService {
         log.debug("Recorded hypothesis conclusion: {} - {}", hypothesisId, result);
     }
 
+    @Transactional
+    @CacheEvict(value = AppConstants.CACHE_DASHBOARD, key = "#tenantId")
+    public void recordOutcomeInvalidated(
+            UUID tenantId,
+            UUID outcomeId,
+            Instant createdAt,
+            Instant invalidatedAt) {
+
+        var today = invalidatedAt.atZone(ZoneOffset.UTC).toLocalDate();
+        var existing = snapshotRepository.findByTenantIdAndMetricTypeAndMetricDate(
+            tenantId, AppConstants.METRIC_OUTCOME_VELOCITY, today);
+
+        if (existing.isPresent()) {
+            var snapshot = existing.get();
+            var dims = snapshot.getDimensions() != null
+                ? new HashMap<>(snapshot.getDimensions())
+                : new HashMap<String, Object>();
+            int invalidated = ((Number) dims.getOrDefault("invalidated", 0)).intValue();
+            dims.put("invalidated", invalidated + 1);
+            snapshot.setDimensions(dims);
+            snapshotRepository.save(snapshot);
+        } else {
+            var dims = new HashMap<String, Object>();
+            dims.put("invalidated", 1);
+            dims.put("validated", 0);
+
+            var snapshot = MetricSnapshot.builder()
+                .tenantId(tenantId)
+                .metricType(AppConstants.METRIC_OUTCOME_VELOCITY)
+                .metricDate(today)
+                .value(BigDecimal.ZERO)
+                .dimensions(dims)
+                .build();
+            snapshotRepository.save(snapshot);
+        }
+
+        log.debug("Recorded outcome invalidation: {}", outcomeId);
+    }
+
     private void updateDailySnapshot(UUID tenantId, LocalDate date) {
         var startOfDay = date.atStartOfDay().toInstant(ZoneOffset.UTC);
         var endOfDay = date.plusDays(1).atStartOfDay().toInstant(ZoneOffset.UTC);

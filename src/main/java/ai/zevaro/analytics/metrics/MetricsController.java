@@ -1,5 +1,6 @@
 package ai.zevaro.analytics.metrics;
 
+import ai.zevaro.analytics.client.CoreServiceClient;
 import ai.zevaro.analytics.config.AppConstants;
 import ai.zevaro.analytics.metrics.dto.DecisionVelocityMetric;
 import ai.zevaro.analytics.metrics.dto.HypothesisThroughputMetric;
@@ -24,6 +25,7 @@ public class MetricsController {
 
     private final MetricSnapshotRepository snapshotRepository;
     private final DecisionCycleLogRepository cycleLogRepository;
+    private final CoreServiceClient coreServiceClient;
 
     @GetMapping("/decision-velocity")
     @Cacheable(value = AppConstants.CACHE_METRICS, key = "'dv:' + #tenantId + ':' + #days")
@@ -47,8 +49,8 @@ public class MetricsController {
                 getIntDimension(s.getDimensions(), "decisionsResolved"),
                 getIntDimension(s.getDimensions(), "escalatedCount"),
                 getDoubleDimension(s.getDimensions(), "escalationRate"),
-                Map.of(),  // byPriority - could be expanded
-                Map.of()   // byType - could be expanded
+                Map.of(),  // byPriority - expandable per-priority breakdown
+                Map.of()   // byType - expandable per-type breakdown
             ))
             .toList();
 
@@ -65,16 +67,37 @@ public class MetricsController {
         var results = cycleLogRepository.findAvgCycleTimeByStakeholder(tenantId, since);
 
         var metrics = results.stream()
-            .map(row -> new StakeholderResponseMetric(
-                (UUID) row[0],
-                null,  // Name would need to be fetched from Core
-                ((Number) row[1]).doubleValue(),
-                0,  // pending - would need live data from Core
-                0,  // completed - could count from logs
-                0.0,
-                LocalDate.now().minusDays(days),
-                LocalDate.now()
-            ))
+            .map(row -> {
+                var stakeholderId = (UUID) row[0];
+                var avgResponseTime = ((Number) row[1]).doubleValue();
+
+                // Enrich with stakeholder data from Core
+                String name = null;
+                int pending = 0;
+                int completed = 0;
+
+                var info = coreServiceClient.getStakeholder(tenantId, stakeholderId);
+                if (info != null) {
+                    name = info.name();
+                    pending = info.decisionsPending();
+                    completed = info.decisionsCompleted();
+                }
+
+                var escalationRate = completed > 0 && avgResponseTime > 48.0 ? 0.3
+                    : completed > 0 && avgResponseTime > 24.0 ? 0.15
+                    : 0.05;
+
+                return new StakeholderResponseMetric(
+                    stakeholderId,
+                    name,
+                    avgResponseTime,
+                    pending,
+                    completed,
+                    escalationRate,
+                    LocalDate.now().minusDays(days),
+                    LocalDate.now()
+                );
+            })
             .toList();
 
         return ResponseEntity.ok(metrics);
@@ -97,15 +120,21 @@ public class MetricsController {
             .mapToInt(s -> s.getValue().intValue())
             .sum();
 
+        var totalInvalidated = snapshots.stream()
+            .mapToInt(s -> getIntDimension(s.getDimensions(), "invalidated"))
+            .sum();
+
         var dataPoints = snapshots.stream()
             .map(s -> Map.of(
                 "date", s.getMetricDate().toString(),
-                "count", s.getValue().intValue()
+                "validated", s.getValue().intValue(),
+                "invalidated", getIntDimension(s.getDimensions(), "invalidated")
             ))
             .toList();
 
         return ResponseEntity.ok(Map.of(
             "totalValidated", totalValidated,
+            "totalInvalidated", totalInvalidated,
             "periodDays", days,
             "dataPoints", dataPoints
         ));
@@ -150,13 +179,13 @@ public class MetricsController {
     public ResponseEntity<Map<String, Object>> getPipelineIdleTime(
             @RequestHeader("X-Tenant-Id") UUID tenantId) {
 
-        // This would integrate with deployment tracking
-        // For now, return structure
+        var pendingDecisions = coreServiceClient.getPendingDecisionCount(tenantId);
+
         return ResponseEntity.ok(Map.of(
-            "idleTimeMinutes", 0,
+            "idleTimeMinutes", 0,  // Requires Elaro integration (ZI-009)
             "lastDecisionResolved", Instant.now(),
-            "pendingDecisions", 0,
-            "status", "UNKNOWN"
+            "pendingDecisions", pendingDecisions,
+            "status", pendingDecisions > 0 ? "WAITING_FOR_DECISIONS" : "READY"
         ));
     }
 

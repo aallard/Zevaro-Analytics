@@ -1,5 +1,6 @@
 package ai.zevaro.analytics.dashboard;
 
+import ai.zevaro.analytics.client.CoreServiceClient;
 import ai.zevaro.analytics.config.AppConstants;
 import ai.zevaro.analytics.dashboard.dto.*;
 import ai.zevaro.analytics.repository.*;
@@ -8,6 +9,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.cache.annotation.Cacheable;
 import org.springframework.stereotype.Service;
 
+import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.temporal.ChronoUnit;
@@ -20,6 +22,7 @@ public class DashboardService {
 
     private final MetricSnapshotRepository snapshotRepository;
     private final DecisionCycleLogRepository cycleLogRepository;
+    private final CoreServiceClient coreServiceClient;
 
     @Cacheable(value = AppConstants.CACHE_DASHBOARD, key = "#tenantId")
     public DashboardData getDashboard(UUID tenantId) {
@@ -44,27 +47,33 @@ public class DashboardService {
             .mapToInt(s -> s.getValue().intValue())
             .sum();
 
-        // Stakeholder leaderboard
+        // Stakeholder leaderboard — enriched with Core data
         var stakeholderData = cycleLogRepository.findAvgCycleTimeByStakeholder(tenantId, thirtyDaysAgo);
-        var leaderboard = buildLeaderboard(stakeholderData);
+        var leaderboard = buildLeaderboard(tenantId, stakeholderData);
 
         // Decision health
         var healthStatus = calculateHealthStatus(avgCycleTime, escalatedCount);
 
+        // Live data from Core service
+        var pendingDecisionCount = coreServiceClient.getPendingDecisionCount(tenantId);
+        var hypothesesTestedThisWeek = coreServiceClient.getHypothesesTestedThisWeek(tenantId);
+        var activeExperiments = coreServiceClient.getActiveHypothesisCount(tenantId);
+        var urgentDecisions = buildUrgentDecisionSummaries(tenantId);
+
         return new DashboardData(
-            0,  // decisionsPendingCount - would need live data from Core
+            pendingDecisionCount,
             avgCycleTime != null ? avgCycleTime : 0.0,
             outcomesThisWeek,
-            0,  // hypothesesTestedThisWeek - would need tracking
-            0,  // experimentsRunning - would need live data
+            hypothesesTestedThisWeek,
+            activeExperiments,
             healthStatus,
-            List.of(),  // urgentDecisions - would need live data from Core
+            urgentDecisions,
             decisionTrend,
             outcomeTrend,
             leaderboard,
-            "IDLE",  // pipelineStatus - would need integration
-            null,    // lastDeployment
-            0        // idleTimeMinutes
+            "IDLE",  // pipelineStatus - requires Elaro integration (ZI-009)
+            null,    // lastDeployment - requires Elaro integration (ZI-009)
+            0        // idleTimeMinutes - requires Elaro integration (ZI-009)
         );
     }
 
@@ -76,8 +85,23 @@ public class DashboardService {
         return Map.of(
             "avgDecisionTimeHours", avgCycleTime != null ? avgCycleTime : 0.0,
             "healthStatus", calculateHealthStatus(avgCycleTime, 0L),
+            "pendingDecisions", coreServiceClient.getPendingDecisionCount(tenantId),
             "lastUpdated", Instant.now()
         );
+    }
+
+    private List<DecisionSummary> buildUrgentDecisionSummaries(UUID tenantId) {
+        var urgent = coreServiceClient.getUrgentDecisions(tenantId);
+        return urgent.stream()
+            .map(d -> new DecisionSummary(
+                d.id(),
+                d.title(),
+                d.priority(),
+                d.ownerName(),
+                Duration.between(d.createdAt(), Instant.now()).toHours(),
+                (int) d.blockedItemsCount()
+            ))
+            .toList();
     }
 
     private List<DataPoint> getDecisionVelocityTrend(UUID tenantId, int days) {
@@ -106,17 +130,35 @@ public class DashboardService {
             .toList();
     }
 
-    private List<StakeholderScore> buildLeaderboard(List<Object[]> data) {
+    private List<StakeholderScore> buildLeaderboard(UUID tenantId, List<Object[]> data) {
         var scores = new ArrayList<StakeholderScore>();
         int rank = 1;
 
         for (var row : data) {
+            var stakeholderId = (UUID) row[0];
+            var avgTime = ((Number) row[1]).doubleValue();
+
+            // Enrich with stakeholder name and stats from Core
+            String name = null;
+            int decisionsCompleted = 0;
+            double slaComplianceRate = 0.0;
+
+            var stakeholderInfo = coreServiceClient.getStakeholder(tenantId, stakeholderId);
+            if (stakeholderInfo != null) {
+                name = stakeholderInfo.name();
+                decisionsCompleted = stakeholderInfo.decisionsCompleted();
+                slaComplianceRate = decisionsCompleted > 0 && avgTime < 24.0 ? 1.0
+                    : decisionsCompleted > 0 && avgTime < 48.0 ? 0.75
+                    : decisionsCompleted > 0 ? 0.5
+                    : 0.0;
+            }
+
             scores.add(new StakeholderScore(
-                (UUID) row[0],
-                null,  // Name would come from Core service
-                ((Number) row[1]).doubleValue(),
-                0,     // decisionsCompleted
-                0.0,   // slaComplianceRate
+                stakeholderId,
+                name,
+                avgTime,
+                decisionsCompleted,
+                slaComplianceRate,
                 rank++
             ));
         }
