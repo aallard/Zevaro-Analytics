@@ -26,6 +26,7 @@ public class InternalMetricsController {
 
         metricsService.recordDecisionResolved(
             request.tenantId(),
+            request.projectId(),
             request.decisionId(),
             request.createdAt(),
             request.resolvedAt(),
@@ -44,6 +45,7 @@ public class InternalMetricsController {
 
         metricsService.recordOutcomeValidated(
             request.tenantId(),
+            request.projectId(),
             request.outcomeId(),
             request.createdAt(),
             request.validatedAt()
@@ -58,6 +60,7 @@ public class InternalMetricsController {
 
         metricsService.recordHypothesisConcluded(
             request.tenantId(),
+            request.projectId(),
             request.hypothesisId(),
             request.outcomeId(),
             request.result(),
@@ -71,6 +74,7 @@ public class InternalMetricsController {
     // Request DTOs
     public record DecisionResolvedRequest(
         UUID tenantId,
+        UUID projectId,
         UUID decisionId,
         Instant createdAt,
         Instant resolvedAt,
@@ -82,6 +86,7 @@ public class InternalMetricsController {
 
     public record OutcomeValidatedRequest(
         UUID tenantId,
+        UUID projectId,
         UUID outcomeId,
         Instant createdAt,
         Instant validatedAt
@@ -89,6 +94,7 @@ public class InternalMetricsController {
 
     public record HypothesisConcludedRequest(
         UUID tenantId,
+        UUID projectId,
         UUID hypothesisId,
         UUID outcomeId,
         String result,
