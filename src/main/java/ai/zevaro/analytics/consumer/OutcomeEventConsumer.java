@@ -17,6 +17,9 @@ public class OutcomeEventConsumer {
 
     private final MetricsService metricsService;
 
+    private final RateLimitedConsumerLogger dbErrorLogger = new RateLimitedConsumerLogger();
+    private final RateLimitedConsumerLogger duplicateLogger = new RateLimitedConsumerLogger();
+
     @KafkaListener(topics = AppConstants.TOPIC_OUTCOME_VALIDATED)
     public void onOutcomeValidated(OutcomeValidatedEvent event) {
         try {
@@ -33,16 +36,13 @@ public class OutcomeEventConsumer {
             log.debug("Successfully processed outcome: {}", event.outcomeId());
 
         } catch (DataIntegrityViolationException e) {
-            // Duplicate event - log and continue (idempotent)
-            log.warn("Duplicate outcome event ignored: {}. Error: {}",
-                event.outcomeId(), e.getMessage());
+            duplicateLogger.warnRateLimited(log,
+                "Duplicate outcome event(s) ignored. Latest: {}. ({} suppressed in last interval)", event.outcomeId());
         } catch (DataAccessException e) {
-            // Database error - log and rethrow for retry
-            log.error("Database error processing outcome event: {}. Will retry.",
-                event.outcomeId(), e);
+            dbErrorLogger.errorRateLimited(log,
+                "Database error processing outcome event(s). Latest: {}. ({} suppressed in last interval)", event.outcomeId());
             throw e;
         } catch (Exception e) {
-            // Unexpected error - log full stack trace
             log.error("Unexpected error processing outcome event: {}",
                 event.outcomeId(), e);
             throw new RuntimeException("Failed to process outcome event", e);

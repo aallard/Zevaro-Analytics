@@ -17,6 +17,9 @@ public class OutcomeInvalidatedEventConsumer {
 
     private final MetricsService metricsService;
 
+    private final RateLimitedConsumerLogger dbErrorLogger = new RateLimitedConsumerLogger();
+    private final RateLimitedConsumerLogger duplicateLogger = new RateLimitedConsumerLogger();
+
     @KafkaListener(topics = AppConstants.TOPIC_OUTCOME_INVALIDATED)
     public void onOutcomeInvalidated(OutcomeInvalidatedEvent event) {
         try {
@@ -33,16 +36,13 @@ public class OutcomeInvalidatedEventConsumer {
             log.debug("Successfully processed outcome invalidation: {}", event.outcomeId());
 
         } catch (DataIntegrityViolationException e) {
-            // Duplicate event - log and continue (idempotent)
-            log.warn("Duplicate outcome invalidated event ignored: {}. Error: {}",
-                event.outcomeId(), e.getMessage());
+            duplicateLogger.warnRateLimited(log,
+                "Duplicate outcome invalidated event(s) ignored. Latest: {}. ({} suppressed in last interval)", event.outcomeId());
         } catch (DataAccessException e) {
-            // Database error - log and rethrow for retry
-            log.error("Database error processing outcome invalidated event: {}. Will retry.",
-                event.outcomeId(), e);
+            dbErrorLogger.errorRateLimited(log,
+                "Database error processing outcome invalidated event(s). Latest: {}. ({} suppressed in last interval)", event.outcomeId());
             throw e;
         } catch (Exception e) {
-            // Unexpected error - log full stack trace
             log.error("Unexpected error processing outcome invalidated event: {}",
                 event.outcomeId(), e);
             throw new RuntimeException("Failed to process outcome invalidated event", e);

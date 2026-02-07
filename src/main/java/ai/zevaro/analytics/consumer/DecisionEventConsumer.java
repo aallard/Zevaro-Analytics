@@ -17,6 +17,10 @@ public class DecisionEventConsumer {
 
     private final MetricsService metricsService;
 
+    // Rate-limited loggers — prevent log storms during DB outages or event replays
+    private final RateLimitedConsumerLogger dbErrorLogger = new RateLimitedConsumerLogger();
+    private final RateLimitedConsumerLogger duplicateLogger = new RateLimitedConsumerLogger();
+
     @KafkaListener(topics = AppConstants.TOPIC_DECISION_RESOLVED)
     public void onDecisionResolved(DecisionResolvedEvent event) {
         try {
@@ -37,16 +41,16 @@ public class DecisionEventConsumer {
             log.debug("Successfully processed decision: {}", event.decisionId());
 
         } catch (DataIntegrityViolationException e) {
-            // Duplicate event - log and continue (idempotent)
-            log.warn("Duplicate decision event ignored: {}. Error: {}",
-                event.decisionId(), e.getMessage());
+            // Duplicate event — rate-limited to prevent flood during rebalance/replay
+            duplicateLogger.warnRateLimited(log,
+                "Duplicate decision event(s) ignored. Latest: {}. ({} suppressed in last interval)", event.decisionId());
         } catch (DataAccessException e) {
-            // Database error - log and rethrow for retry
-            log.error("Database error processing decision event: {}. Will retry.",
-                event.decisionId(), e);
+            // Database error — rate-limited to prevent flood during DB outage
+            dbErrorLogger.errorRateLimited(log,
+                "Database error processing decision event(s). Latest: {}. ({} suppressed in last interval)", event.decisionId());
             throw e;
         } catch (Exception e) {
-            // Unexpected error - log full stack trace
+            // Unexpected errors are always logged (they should be rare)
             log.error("Unexpected error processing decision event: {}",
                 event.decisionId(), e);
             throw new RuntimeException("Failed to process decision event", e);

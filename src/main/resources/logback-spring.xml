@@ -5,21 +5,26 @@
     <property name="LOG_PATH" value="${LOG_PATH:-${user.home}/Documents/Github/logs}"/>
     <property name="LOG_FILE" value="${LOG_PATH}/zevaro-analytics"/>
 
-    <!-- Console appender -->
+    <!-- Console appender with WARN threshold to prevent console flood -->
     <appender name="CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
         <encoder>
             <pattern>${CONSOLE_LOG_PATTERN}</pattern>
         </encoder>
     </appender>
 
-    <!-- Rolling file appender with size and time limits -->
+    <!--
+        Rolling file appender — HARD CAPPED at 500MB total.
+        maxFileSize 50MB × maxHistory 7 days × ~1 file/day = well under cap.
+        totalSizeCap is the ultimate backstop regardless of write speed.
+    -->
     <appender name="FILE" class="ch.qos.logback.core.rolling.RollingFileAppender">
         <file>${LOG_FILE}.log</file>
         <rollingPolicy class="ch.qos.logback.core.rolling.SizeAndTimeBasedRollingPolicy">
             <fileNamePattern>${LOG_FILE}.%d{yyyy-MM-dd}.%i.log.gz</fileNamePattern>
-            <maxFileSize>100MB</maxFileSize>
+            <maxFileSize>50MB</maxFileSize>
             <maxHistory>7</maxHistory>
-            <totalSizeCap>1GB</totalSizeCap>
+            <totalSizeCap>500MB</totalSizeCap>
+            <cleanHistoryOnStart>true</cleanHistoryOnStart>
         </rollingPolicy>
         <encoder>
             <pattern>%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level %logger{36} - %msg%n</pattern>
@@ -34,17 +39,17 @@
             <maxFileSize>10MB</maxFileSize>
             <maxHistory>3</maxHistory>
             <totalSizeCap>50MB</totalSizeCap>
+            <cleanHistoryOnStart>true</cleanHistoryOnStart>
         </rollingPolicy>
         <encoder>
             <pattern>%d{yyyy-MM-dd HH:mm:ss.SSS} %-5level %logger{36} - %msg%n</pattern>
         </encoder>
-        <!-- Only log WARN and above -->
         <filter class="ch.qos.logback.classic.filter.ThresholdFilter">
             <level>WARN</level>
         </filter>
     </appender>
 
-    <!-- Kafka client loggers - reduced to ERROR and separate file -->
+    <!-- ===== Kafka native client loggers — ERROR only, isolated file ===== -->
     <logger name="org.apache.kafka" level="ERROR" additivity="false">
         <appender-ref ref="KAFKA_RATE_LIMITED"/>
     </logger>
@@ -57,9 +62,32 @@
     <logger name="org.apache.kafka.clients.consumer.internals" level="ERROR" additivity="false">
         <appender-ref ref="KAFKA_RATE_LIMITED"/>
     </logger>
+    <!-- Kafka admin client (used by health indicator) -->
+    <logger name="org.apache.kafka.clients.admin" level="ERROR" additivity="false">
+        <appender-ref ref="KAFKA_RATE_LIMITED"/>
+    </logger>
 
-    <!-- Spring Kafka - reduced verbosity -->
-    <logger name="org.springframework.kafka" level="WARN"/>
+    <!-- Spring Kafka framework — WARN only, isolated to Kafka file -->
+    <logger name="org.springframework.kafka" level="WARN" additivity="false">
+        <appender-ref ref="KAFKA_RATE_LIMITED"/>
+    </logger>
+
+    <!--
+        Kafka consumers — these are the APPLICATION-LEVEL consumers that
+        log errors on processing failures. Route to Kafka file to prevent
+        main log flooding during DB outages or message storms.
+    -->
+    <logger name="ai.zevaro.analytics.consumer" level="INFO" additivity="false">
+        <appender-ref ref="KAFKA_RATE_LIMITED"/>
+        <appender-ref ref="CONSOLE"/>
+    </logger>
+
+    <!--
+        CoreServiceClient — logs warn on every failed REST call.
+        During Core outage, dashboard requests trigger 5+ warns per request.
+        Route to main file but cap at WARN to prevent debug/info flooding.
+    -->
+    <logger name="ai.zevaro.analytics.client" level="WARN"/>
 
     <!-- Application loggers -->
     <logger name="ai.zevaro.analytics" level="INFO"/>

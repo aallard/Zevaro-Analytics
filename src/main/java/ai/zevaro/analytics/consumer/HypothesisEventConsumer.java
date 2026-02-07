@@ -17,6 +17,9 @@ public class HypothesisEventConsumer {
 
     private final MetricsService metricsService;
 
+    private final RateLimitedConsumerLogger dbErrorLogger = new RateLimitedConsumerLogger();
+    private final RateLimitedConsumerLogger duplicateLogger = new RateLimitedConsumerLogger();
+
     @KafkaListener(topics = AppConstants.TOPIC_HYPOTHESIS_CONCLUDED)
     public void onHypothesisConcluded(HypothesisConcludedEvent event) {
         try {
@@ -35,16 +38,13 @@ public class HypothesisEventConsumer {
             log.debug("Successfully processed hypothesis: {}", event.hypothesisId());
 
         } catch (DataIntegrityViolationException e) {
-            // Duplicate event - log and continue (idempotent)
-            log.warn("Duplicate hypothesis event ignored: {}. Error: {}",
-                event.hypothesisId(), e.getMessage());
+            duplicateLogger.warnRateLimited(log,
+                "Duplicate hypothesis event(s) ignored. Latest: {}. ({} suppressed in last interval)", event.hypothesisId());
         } catch (DataAccessException e) {
-            // Database error - log and rethrow for retry
-            log.error("Database error processing hypothesis event: {}. Will retry.",
-                event.hypothesisId(), e);
+            dbErrorLogger.errorRateLimited(log,
+                "Database error processing hypothesis event(s). Latest: {}. ({} suppressed in last interval)", event.hypothesisId());
             throw e;
         } catch (Exception e) {
-            // Unexpected error - log full stack trace
             log.error("Unexpected error processing hypothesis event: {}",
                 event.hypothesisId(), e);
             throw new RuntimeException("Failed to process hypothesis event", e);

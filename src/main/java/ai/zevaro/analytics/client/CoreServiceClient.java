@@ -12,13 +12,22 @@ import org.springframework.web.client.RestClientException;
 import org.springframework.web.client.RestTemplate;
 
 import java.net.URI;
+import java.time.Duration;
+import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * REST client for Zevaro Core service.
  * Fetches live data (pending decisions, stakeholder names, outcome details, etc.)
  * that Analytics cannot compute from its own local metrics tables.
+ *
+ * RATE-LIMITED LOGGING: When Core is unreachable, logs one error on first failure
+ * then suppresses further warnings for 5 minutes to prevent log storms.
+ * A dashboard request can trigger 5-7 Core calls — without rate limiting,
+ * a Core outage + user traffic produces thousands of log.warn per minute.
  */
 @Component
 @Slf4j
@@ -27,11 +36,61 @@ public class CoreServiceClient {
     private final RestTemplate restTemplate;
     private final String coreServiceUrl;
 
+    // Rate-limited logging state — prevents log storms when Core is down
+    private final AtomicReference<Instant> lastErrorLog = new AtomicReference<>(Instant.EPOCH);
+    private final AtomicInteger suppressedCount = new AtomicInteger(0);
+    private final AtomicReference<Instant> firstFailure = new AtomicReference<>(null);
+    private static final Duration ERROR_LOG_INTERVAL = Duration.ofMinutes(5);
+
     public CoreServiceClient(
             RestTemplate restTemplate,
             @Value("${services.core.url}") String coreServiceUrl) {
         this.restTemplate = restTemplate;
         this.coreServiceUrl = coreServiceUrl;
+    }
+
+    /**
+     * Rate-limited error logging for Core service failures.
+     * Logs immediately on first failure, then at most once every 5 minutes.
+     * Tracks and reports the number of suppressed warnings.
+     */
+    private void logCoreFailure(String operation, String errorMessage) {
+        Instant now = Instant.now();
+        firstFailure.compareAndSet(null, now);
+        Instant lastLog = lastErrorLog.get();
+
+        if (Duration.between(lastLog, now).compareTo(ERROR_LOG_INTERVAL) > 0) {
+            int suppressed = suppressedCount.getAndSet(0);
+            if (suppressed > 0) {
+                log.warn("Core service UNAVAILABLE — {} failed. {} warnings suppressed in last interval. Error: {}",
+                    operation, suppressed, errorMessage);
+            } else {
+                log.warn("Core service UNAVAILABLE — {} failed. Error: {}", operation, errorMessage);
+            }
+            lastErrorLog.set(now);
+        } else {
+            suppressedCount.incrementAndGet();
+        }
+    }
+
+    /**
+     * Called when a Core request succeeds after a failure period.
+     * Logs recovery and resets rate-limit state.
+     */
+    private void logCoreRecovery() {
+        Instant failure = firstFailure.getAndSet(null);
+        if (failure != null) {
+            int suppressed = suppressedCount.getAndSet(0);
+            Duration downtime = Duration.between(failure, Instant.now());
+            log.info("Core service RESTORED after {}. {} warnings were suppressed during outage.",
+                formatDuration(downtime), suppressed);
+        }
+    }
+
+    private String formatDuration(Duration d) {
+        long mins = d.toMinutes();
+        long secs = d.toSecondsPart();
+        return mins > 0 ? String.format("%dm %ds", mins, secs) : String.format("%ds", secs);
     }
 
     /**
@@ -44,9 +103,10 @@ public class CoreServiceClient {
             var request = new RequestEntity<>(headers, HttpMethod.GET, uri);
             var response = restTemplate.exchange(request, new ParameterizedTypeReference<CorePageResponse>() {});
             var body = response.getBody();
+            logCoreRecovery();
             return body != null ? body.totalElements() : 0;
         } catch (RestClientException e) {
-            log.warn("Failed to fetch pending decision count from Core service: {}", e.getMessage());
+            logCoreFailure("getPendingDecisionCount", e.getMessage());
             return 0;
         }
     }
@@ -61,9 +121,10 @@ public class CoreServiceClient {
             var request = new RequestEntity<>(headers, HttpMethod.GET, uri);
             var response = restTemplate.exchange(request, new ParameterizedTypeReference<CoreListResponse<CoreDecisionSummary>>() {});
             var body = response.getBody();
+            logCoreRecovery();
             return body != null ? body.content() : List.of();
         } catch (RestClientException e) {
-            log.warn("Failed to fetch urgent decisions from Core service: {}", e.getMessage());
+            logCoreFailure("getUrgentDecisions", e.getMessage());
             return List.of();
         }
     }
@@ -77,9 +138,10 @@ public class CoreServiceClient {
             var headers = buildHeaders(tenantId);
             var request = new RequestEntity<>(headers, HttpMethod.GET, uri);
             var response = restTemplate.exchange(request, CoreStakeholderInfo.class);
+            logCoreRecovery();
             return response.getBody();
         } catch (RestClientException e) {
-            log.warn("Failed to fetch stakeholder {} from Core service: {}", stakeholderId, e.getMessage());
+            logCoreFailure("getStakeholder(" + stakeholderId + ")", e.getMessage());
             return null;
         }
     }
@@ -93,9 +155,10 @@ public class CoreServiceClient {
             var headers = buildHeaders(tenantId);
             var request = new RequestEntity<>(headers, HttpMethod.GET, uri);
             var response = restTemplate.exchange(request, CoreOutcomeInfo.class);
+            logCoreRecovery();
             return response.getBody();
         } catch (RestClientException e) {
-            log.warn("Failed to fetch outcome {} from Core service: {}", outcomeId, e.getMessage());
+            logCoreFailure("getOutcome(" + outcomeId + ")", e.getMessage());
             return null;
         }
     }
@@ -110,9 +173,10 @@ public class CoreServiceClient {
             var request = new RequestEntity<>(headers, HttpMethod.GET, uri);
             var response = restTemplate.exchange(request, new ParameterizedTypeReference<CorePageResponse>() {});
             var body = response.getBody();
+            logCoreRecovery();
             return body != null ? body.totalElements() : 0;
         } catch (RestClientException e) {
-            log.warn("Failed to fetch active hypothesis count from Core service: {}", e.getMessage());
+            logCoreFailure("getActiveHypothesisCount", e.getMessage());
             return 0;
         }
     }
@@ -127,9 +191,10 @@ public class CoreServiceClient {
             var request = new RequestEntity<>(headers, HttpMethod.GET, uri);
             var response = restTemplate.exchange(request, new ParameterizedTypeReference<CorePageResponse>() {});
             var body = response.getBody();
+            logCoreRecovery();
             return body != null ? body.totalElements() : 0;
         } catch (RestClientException e) {
-            log.warn("Failed to fetch hypothesis tested count from Core service: {}", e.getMessage());
+            logCoreFailure("getHypothesesTestedThisWeek", e.getMessage());
             return 0;
         }
     }
@@ -144,9 +209,10 @@ public class CoreServiceClient {
             var request = new RequestEntity<>(headers, HttpMethod.GET, uri);
             var response = restTemplate.exchange(request, new ParameterizedTypeReference<CorePageResponse>() {});
             var body = response.getBody();
+            logCoreRecovery();
             return body != null ? body.totalElements() : 0;
         } catch (RestClientException e) {
-            log.warn("Failed to fetch decisions created count from Core service: {}", e.getMessage());
+            logCoreFailure("getDecisionsCreatedCount", e.getMessage());
             return 0;
         }
     }
