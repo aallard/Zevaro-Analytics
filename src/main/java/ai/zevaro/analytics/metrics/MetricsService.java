@@ -30,6 +30,7 @@ public class MetricsService {
     @CacheEvict(value = AppConstants.CACHE_DASHBOARD, key = "#tenantId")
     public void recordDecisionResolved(
             UUID tenantId,
+            UUID projectId,
             UUID decisionId,
             Instant createdAt,
             Instant resolvedAt,
@@ -44,6 +45,7 @@ public class MetricsService {
         // Log the individual decision
         var cycleLog = DecisionCycleLog.builder()
             .tenantId(tenantId)
+            .projectId(projectId)
             .decisionId(decisionId)
             .createdAt(createdAt)
             .resolvedAt(resolvedAt)
@@ -57,7 +59,7 @@ public class MetricsService {
         cycleLogRepository.save(cycleLog);
 
         // Update daily snapshot
-        updateDailySnapshot(tenantId, resolvedAt.atZone(ZoneOffset.UTC).toLocalDate());
+        updateDailySnapshot(tenantId, projectId, resolvedAt.atZone(ZoneOffset.UTC).toLocalDate());
 
         log.debug("Recorded decision cycle: {}h for decision {}", cycleTimeHours, decisionId);
     }
@@ -66,6 +68,7 @@ public class MetricsService {
     @CacheEvict(value = AppConstants.CACHE_DASHBOARD, key = "#tenantId")
     public void recordOutcomeValidated(
             UUID tenantId,
+            UUID projectId,
             UUID outcomeId,
             Instant createdAt,
             Instant validatedAt) {
@@ -82,6 +85,7 @@ public class MetricsService {
         } else {
             var snapshot = MetricSnapshot.builder()
                 .tenantId(tenantId)
+                .projectId(projectId)
                 .metricType(AppConstants.METRIC_OUTCOME_VELOCITY)
                 .metricDate(today)
                 .value(BigDecimal.ONE)
@@ -97,6 +101,7 @@ public class MetricsService {
     @CacheEvict(value = AppConstants.CACHE_DASHBOARD, key = "#tenantId")
     public void recordHypothesisConcluded(
             UUID tenantId,
+            UUID projectId,
             UUID hypothesisId,
             UUID outcomeId,
             String result,  // VALIDATED or INVALIDATED
@@ -134,6 +139,7 @@ public class MetricsService {
 
             var snapshot = MetricSnapshot.builder()
                 .tenantId(tenantId)
+                .projectId(projectId)
                 .metricType(AppConstants.METRIC_HYPOTHESIS_THROUGHPUT)
                 .metricDate(today)
                 .value(BigDecimal.ONE)
@@ -149,6 +155,7 @@ public class MetricsService {
     @CacheEvict(value = AppConstants.CACHE_DASHBOARD, key = "#tenantId")
     public void recordOutcomeInvalidated(
             UUID tenantId,
+            UUID projectId,
             UUID outcomeId,
             Instant createdAt,
             Instant invalidatedAt) {
@@ -173,6 +180,7 @@ public class MetricsService {
 
             var snapshot = MetricSnapshot.builder()
                 .tenantId(tenantId)
+                .projectId(projectId)
                 .metricType(AppConstants.METRIC_OUTCOME_VELOCITY)
                 .metricDate(today)
                 .value(BigDecimal.ZERO)
@@ -184,7 +192,7 @@ public class MetricsService {
         log.debug("Recorded outcome invalidation: {}", outcomeId);
     }
 
-    private void updateDailySnapshot(UUID tenantId, LocalDate date) {
+    private void updateDailySnapshot(UUID tenantId, UUID projectId, LocalDate date) {
         var startOfDay = date.atStartOfDay().toInstant(ZoneOffset.UTC);
         var endOfDay = date.plusDays(1).atStartOfDay().toInstant(ZoneOffset.UTC);
 
@@ -206,6 +214,7 @@ public class MetricsService {
 
         var snapshot = existing.orElse(MetricSnapshot.builder()
             .tenantId(tenantId)
+            .projectId(projectId)
             .metricType(AppConstants.METRIC_DECISION_VELOCITY)
             .metricDate(date)
             .build());

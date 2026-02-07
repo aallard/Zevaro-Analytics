@@ -6,6 +6,7 @@ import ai.zevaro.analytics.repository.*;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.cache.annotation.Cacheable;
+import org.springframework.lang.Nullable;
 import org.springframework.stereotype.Service;
 
 import java.time.Instant;
@@ -23,24 +24,24 @@ public class InsightsService {
 
     private static final double SIGNIFICANCE_THRESHOLD = 10.0;  // 10% change
 
-    @Cacheable(value = AppConstants.CACHE_METRICS, key = "'insights:' + #tenantId")
-    public List<Insight> generateInsights(UUID tenantId) {
+    @Cacheable(value = AppConstants.CACHE_METRICS, key = "'insights:' + #tenantId + ':' + #projectId")
+    public List<Insight> generateInsights(UUID tenantId, @Nullable UUID projectId) {
         var insights = new ArrayList<Insight>();
 
         // Analyze decision velocity trend
-        var decisionTrend = analyzeDecisionVelocityTrend(tenantId);
+        var decisionTrend = analyzeDecisionVelocityTrend(tenantId, projectId);
         if (decisionTrend.isSignificant()) {
             insights.add(createTrendInsight(decisionTrend));
         }
 
         // Check for bottlenecks
-        var bottleneckInsight = detectBottlenecks(tenantId);
+        var bottleneckInsight = detectBottlenecks(tenantId, projectId);
         if (bottleneckInsight != null) {
             insights.add(bottleneckInsight);
         }
 
         // Check for achievements
-        var achievementInsight = detectAchievements(tenantId);
+        var achievementInsight = detectAchievements(tenantId, projectId);
         if (achievementInsight != null) {
             insights.add(achievementInsight);
         }
@@ -48,27 +49,31 @@ public class InsightsService {
         return insights;
     }
 
-    public List<Trend> detectTrends(UUID tenantId) {
+    public List<Trend> detectTrends(UUID tenantId, @Nullable UUID projectId) {
         var trends = new ArrayList<Trend>();
 
-        trends.add(analyzeDecisionVelocityTrend(tenantId));
-        trends.add(analyzeOutcomeVelocityTrend(tenantId));
+        trends.add(analyzeDecisionVelocityTrend(tenantId, projectId));
+        trends.add(analyzeOutcomeVelocityTrend(tenantId, projectId));
 
         return trends;
     }
 
-    public List<String> getRecommendations(UUID tenantId) {
+    public List<String> getRecommendations(UUID tenantId, @Nullable UUID projectId) {
         var recommendations = new ArrayList<String>();
         var thirtyDaysAgo = Instant.now().minus(30, ChronoUnit.DAYS);
 
         // Check average cycle time
-        var avgCycleTime = cycleLogRepository.findAvgCycleTimeSince(tenantId, thirtyDaysAgo);
+        var avgCycleTime = projectId != null
+            ? cycleLogRepository.findAvgCycleTimeSinceByProject(tenantId, projectId, thirtyDaysAgo)
+            : cycleLogRepository.findAvgCycleTimeSince(tenantId, thirtyDaysAgo);
         if (avgCycleTime != null && avgCycleTime > 48) {
             recommendations.add("Consider breaking down complex decisions into smaller, time-boxed choices");
         }
 
         // Check escalation rate
-        var escalatedCount = cycleLogRepository.countEscalatedSince(tenantId, thirtyDaysAgo);
+        var escalatedCount = projectId != null
+            ? cycleLogRepository.countEscalatedSinceByProject(tenantId, projectId, thirtyDaysAgo)
+            : cycleLogRepository.countEscalatedSince(tenantId, thirtyDaysAgo);
         var logs = cycleLogRepository.findByTenantIdAndResolvedAtBetween(
             tenantId, thirtyDaysAgo, Instant.now());
 
@@ -88,17 +93,21 @@ public class InsightsService {
         return recommendations;
     }
 
-    private Trend analyzeDecisionVelocityTrend(UUID tenantId) {
+    private Trend analyzeDecisionVelocityTrend(UUID tenantId, @Nullable UUID projectId) {
         var endDate = LocalDate.now();
         var midDate = endDate.minusDays(15);
         var startDate = endDate.minusDays(30);
 
-        var firstHalf = snapshotRepository
-            .findByTenantIdAndMetricTypeAndMetricDateBetweenOrderByMetricDateAsc(
+        var firstHalf = projectId != null
+            ? snapshotRepository.findByTenantIdAndProjectIdAndMetricTypeAndMetricDateBetweenOrderByMetricDateAsc(
+                tenantId, projectId, AppConstants.METRIC_DECISION_VELOCITY, startDate, midDate)
+            : snapshotRepository.findByTenantIdAndMetricTypeAndMetricDateBetweenOrderByMetricDateAsc(
                 tenantId, AppConstants.METRIC_DECISION_VELOCITY, startDate, midDate);
 
-        var secondHalf = snapshotRepository
-            .findByTenantIdAndMetricTypeAndMetricDateBetweenOrderByMetricDateAsc(
+        var secondHalf = projectId != null
+            ? snapshotRepository.findByTenantIdAndProjectIdAndMetricTypeAndMetricDateBetweenOrderByMetricDateAsc(
+                tenantId, projectId, AppConstants.METRIC_DECISION_VELOCITY, midDate, endDate)
+            : snapshotRepository.findByTenantIdAndMetricTypeAndMetricDateBetweenOrderByMetricDateAsc(
                 tenantId, AppConstants.METRIC_DECISION_VELOCITY, midDate, endDate);
 
         var firstAvg = firstHalf.stream()
@@ -125,17 +134,21 @@ public class InsightsService {
         );
     }
 
-    private Trend analyzeOutcomeVelocityTrend(UUID tenantId) {
+    private Trend analyzeOutcomeVelocityTrend(UUID tenantId, @Nullable UUID projectId) {
         var endDate = LocalDate.now();
         var midDate = endDate.minusDays(15);
         var startDate = endDate.minusDays(30);
 
-        var firstHalf = snapshotRepository
-            .findByTenantIdAndMetricTypeAndMetricDateBetweenOrderByMetricDateAsc(
+        var firstHalf = projectId != null
+            ? snapshotRepository.findByTenantIdAndProjectIdAndMetricTypeAndMetricDateBetweenOrderByMetricDateAsc(
+                tenantId, projectId, AppConstants.METRIC_OUTCOME_VELOCITY, startDate, midDate)
+            : snapshotRepository.findByTenantIdAndMetricTypeAndMetricDateBetweenOrderByMetricDateAsc(
                 tenantId, AppConstants.METRIC_OUTCOME_VELOCITY, startDate, midDate);
 
-        var secondHalf = snapshotRepository
-            .findByTenantIdAndMetricTypeAndMetricDateBetweenOrderByMetricDateAsc(
+        var secondHalf = projectId != null
+            ? snapshotRepository.findByTenantIdAndProjectIdAndMetricTypeAndMetricDateBetweenOrderByMetricDateAsc(
+                tenantId, projectId, AppConstants.METRIC_OUTCOME_VELOCITY, midDate, endDate)
+            : snapshotRepository.findByTenantIdAndMetricTypeAndMetricDateBetweenOrderByMetricDateAsc(
                 tenantId, AppConstants.METRIC_OUTCOME_VELOCITY, midDate, endDate);
 
         var firstSum = firstHalf.stream().mapToInt(s -> s.getValue().intValue()).sum();
@@ -177,9 +190,21 @@ public class InsightsService {
         );
     }
 
-    private Insight detectBottlenecks(UUID tenantId) {
+    private Insight detectBottlenecks(UUID tenantId, @Nullable UUID projectId) {
         var thirtyDaysAgo = Instant.now().minus(30, ChronoUnit.DAYS);
-        var stakeholderData = cycleLogRepository.findAvgCycleTimeByStakeholder(tenantId, thirtyDaysAgo);
+        var stakeholderData = projectId != null
+            ? cycleLogRepository.findByTenantIdAndProjectId(tenantId, projectId).stream()
+                .collect(java.util.stream.Collectors.groupingBy(
+                    log -> log.getStakeholderId(),
+                    java.util.stream.Collectors.mapping(
+                        log -> log.getCycleTimeHours().doubleValue(),
+                        java.util.stream.Collectors.averagingDouble(d -> d)
+                    )
+                ))
+                .entrySet().stream()
+                .map(e -> new Object[]{e.getKey(), e.getValue()})
+                .toList()
+            : cycleLogRepository.findAvgCycleTimeByStakeholder(tenantId, thirtyDaysAgo);
 
         if (stakeholderData.isEmpty()) return null;
 
@@ -207,10 +232,15 @@ public class InsightsService {
         return null;
     }
 
-    private Insight detectAchievements(UUID tenantId) {
+    private Insight detectAchievements(UUID tenantId, @Nullable UUID projectId) {
         var sevenDaysAgo = Instant.now().minus(7, ChronoUnit.DAYS);
         var logs = cycleLogRepository.findByTenantIdAndResolvedAtBetween(
             tenantId, sevenDaysAgo, Instant.now());
+        if (projectId != null) {
+            logs = logs.stream()
+                .filter(log -> projectId.equals(log.getProjectId()))
+                .toList();
+        }
 
         if (logs.size() >= 10) {
             var avgCycleTime = logs.stream()

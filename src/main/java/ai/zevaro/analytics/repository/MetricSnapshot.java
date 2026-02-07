@@ -32,6 +32,9 @@ public class MetricSnapshot {
     @Column(name = "tenant_id", nullable = false)
     private UUID tenantId;
 
+    @Column(name = "project_id")
+    private UUID projectId;
+
     @Column(name = "metric_type", nullable = false, length = 50)
     private String metricType;
 

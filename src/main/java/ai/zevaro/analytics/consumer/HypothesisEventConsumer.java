@@ -28,6 +28,7 @@ public class HypothesisEventConsumer {
 
             metricsService.recordHypothesisConcluded(
                 event.tenantId(),
+                event.projectId(),
                 event.hypothesisId(),
                 event.outcomeId(),
                 event.result(),

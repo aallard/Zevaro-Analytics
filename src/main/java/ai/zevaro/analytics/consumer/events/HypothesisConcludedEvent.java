@@ -5,6 +5,7 @@ import java.util.UUID;
 
 public record HypothesisConcludedEvent(
     UUID tenantId,
+    UUID projectId,
     UUID hypothesisId,
     UUID outcomeId,
     String result,  // VALIDATED or INVALIDATED

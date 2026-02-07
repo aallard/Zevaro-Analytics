@@ -25,4 +25,18 @@ public interface MetricSnapshotRepository extends JpaRepository<MetricSnapshot, 
         @Param("tenantId") UUID tenantId,
         @Param("metricType") String metricType,
         @Param("limit") int limit);
+
+    Optional<MetricSnapshot> findByTenantIdAndProjectIdAndMetricTypeAndMetricDate(
+        UUID tenantId, UUID projectId, String metricType, LocalDate metricDate);
+
+    List<MetricSnapshot> findByTenantIdAndProjectIdAndMetricTypeAndMetricDateBetweenOrderByMetricDateAsc(
+        UUID tenantId, UUID projectId, String metricType, LocalDate startDate, LocalDate endDate);
+
+    @Query("SELECT m FROM MetricSnapshot m WHERE m.tenantId = :tenantId " +
+           "AND m.projectId = :projectId AND m.metricType = :metricType ORDER BY m.metricDate DESC LIMIT :limit")
+    List<MetricSnapshot> findRecentByTenantProjectAndType(
+        @Param("tenantId") UUID tenantId,
+        @Param("projectId") UUID projectId,
+        @Param("metricType") String metricType,
+        @Param("limit") int limit);
 }

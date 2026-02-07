@@ -4,6 +4,7 @@ import ai.zevaro.analytics.config.AppConstants;
 import ai.zevaro.analytics.insights.dto.*;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
+import org.springframework.lang.Nullable;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
@@ -18,19 +19,22 @@ public class InsightsController {
 
     @GetMapping
     public ResponseEntity<List<Insight>> getInsights(
-            @RequestHeader("X-Tenant-Id") UUID tenantId) {
-        return ResponseEntity.ok(insightsService.generateInsights(tenantId));
+            @RequestHeader("X-Tenant-Id") UUID tenantId,
+            @RequestParam(required = false) @Nullable UUID projectId) {
+        return ResponseEntity.ok(insightsService.generateInsights(tenantId, projectId));
     }
 
     @GetMapping("/trends")
     public ResponseEntity<List<Trend>> getTrends(
-            @RequestHeader("X-Tenant-Id") UUID tenantId) {
-        return ResponseEntity.ok(insightsService.detectTrends(tenantId));
+            @RequestHeader("X-Tenant-Id") UUID tenantId,
+            @RequestParam(required = false) @Nullable UUID projectId) {
+        return ResponseEntity.ok(insightsService.detectTrends(tenantId, projectId));
     }
 
     @GetMapping("/recommendations")
     public ResponseEntity<List<String>> getRecommendations(
-            @RequestHeader("X-Tenant-Id") UUID tenantId) {
-        return ResponseEntity.ok(insightsService.getRecommendations(tenantId));
+            @RequestHeader("X-Tenant-Id") UUID tenantId,
+            @RequestParam(required = false) @Nullable UUID projectId) {
+        return ResponseEntity.ok(insightsService.getRecommendations(tenantId, projectId));
     }
 }

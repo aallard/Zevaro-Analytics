@@ -10,6 +10,7 @@ import ai.zevaro.analytics.repository.MetricSnapshotRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.cache.annotation.Cacheable;
 import org.springframework.http.ResponseEntity;
+import org.springframework.lang.Nullable;
 import org.springframework.web.bind.annotation.*;
 
 import java.time.Instant;
@@ -28,16 +29,19 @@ public class MetricsController {
     private final CoreServiceClient coreServiceClient;
 
     @GetMapping("/decision-velocity")
-    @Cacheable(value = AppConstants.CACHE_METRICS, key = "'dv:' + #tenantId + ':' + #days")
+    @Cacheable(value = AppConstants.CACHE_METRICS, key = "'dv:' + #tenantId + ':' + #projectId + ':' + #days")
     public ResponseEntity<List<DecisionVelocityMetric>> getDecisionVelocity(
             @RequestHeader("X-Tenant-Id") UUID tenantId,
+            @RequestParam(required = false) @Nullable UUID projectId,
             @RequestParam(defaultValue = "30") int days) {
 
         var endDate = LocalDate.now();
         var startDate = endDate.minusDays(days);
 
-        var snapshots = snapshotRepository
-            .findByTenantIdAndMetricTypeAndMetricDateBetweenOrderByMetricDateAsc(
+        var snapshots = projectId != null
+            ? snapshotRepository.findByTenantIdAndProjectIdAndMetricTypeAndMetricDateBetweenOrderByMetricDateAsc(
+                tenantId, projectId, AppConstants.METRIC_DECISION_VELOCITY, startDate, endDate)
+            : snapshotRepository.findByTenantIdAndMetricTypeAndMetricDateBetweenOrderByMetricDateAsc(
                 tenantId, AppConstants.METRIC_DECISION_VELOCITY, startDate, endDate);
 
         var metrics = snapshots.stream()
@@ -104,16 +108,19 @@ public class MetricsController {
     }
 
     @GetMapping("/outcome-velocity")
-    @Cacheable(value = AppConstants.CACHE_METRICS, key = "'ov:' + #tenantId + ':' + #days")
+    @Cacheable(value = AppConstants.CACHE_METRICS, key = "'ov:' + #tenantId + ':' + #projectId + ':' + #days")
     public ResponseEntity<Map<String, Object>> getOutcomeVelocity(
             @RequestHeader("X-Tenant-Id") UUID tenantId,
+            @RequestParam(required = false) @Nullable UUID projectId,
             @RequestParam(defaultValue = "30") int days) {
 
         var endDate = LocalDate.now();
         var startDate = endDate.minusDays(days);
 
-        var snapshots = snapshotRepository
-            .findByTenantIdAndMetricTypeAndMetricDateBetweenOrderByMetricDateAsc(
+        var snapshots = projectId != null
+            ? snapshotRepository.findByTenantIdAndProjectIdAndMetricTypeAndMetricDateBetweenOrderByMetricDateAsc(
+                tenantId, projectId, AppConstants.METRIC_OUTCOME_VELOCITY, startDate, endDate)
+            : snapshotRepository.findByTenantIdAndMetricTypeAndMetricDateBetweenOrderByMetricDateAsc(
                 tenantId, AppConstants.METRIC_OUTCOME_VELOCITY, startDate, endDate);
 
         var totalValidated = snapshots.stream()
@@ -141,16 +148,19 @@ public class MetricsController {
     }
 
     @GetMapping("/hypothesis-throughput")
-    @Cacheable(value = AppConstants.CACHE_METRICS, key = "'ht:' + #tenantId + ':' + #days")
+    @Cacheable(value = AppConstants.CACHE_METRICS, key = "'ht:' + #tenantId + ':' + #projectId + ':' + #days")
     public ResponseEntity<List<HypothesisThroughputMetric>> getHypothesisThroughput(
             @RequestHeader("X-Tenant-Id") UUID tenantId,
+            @RequestParam(required = false) @Nullable UUID projectId,
             @RequestParam(defaultValue = "30") int days) {
 
         var endDate = LocalDate.now();
         var startDate = endDate.minusDays(days);
 
-        var snapshots = snapshotRepository
-            .findByTenantIdAndMetricTypeAndMetricDateBetweenOrderByMetricDateAsc(
+        var snapshots = projectId != null
+            ? snapshotRepository.findByTenantIdAndProjectIdAndMetricTypeAndMetricDateBetweenOrderByMetricDateAsc(
+                tenantId, projectId, AppConstants.METRIC_HYPOTHESIS_THROUGHPUT, startDate, endDate)
+            : snapshotRepository.findByTenantIdAndMetricTypeAndMetricDateBetweenOrderByMetricDateAsc(
                 tenantId, AppConstants.METRIC_HYPOTHESIS_THROUGHPUT, startDate, endDate);
 
         var metrics = snapshots.stream()

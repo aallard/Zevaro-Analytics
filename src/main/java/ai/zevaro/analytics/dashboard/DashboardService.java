@@ -7,6 +7,7 @@ import ai.zevaro.analytics.repository.*;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.cache.annotation.Cacheable;
+import org.springframework.lang.Nullable;
 import org.springframework.stereotype.Service;
 
 import java.time.Duration;
@@ -24,18 +25,22 @@ public class DashboardService {
     private final DecisionCycleLogRepository cycleLogRepository;
     private final CoreServiceClient coreServiceClient;
 
-    @Cacheable(value = AppConstants.CACHE_DASHBOARD, key = "#tenantId")
-    public DashboardData getDashboard(UUID tenantId) {
+    @Cacheable(value = AppConstants.CACHE_DASHBOARD, key = "#tenantId + ':' + #projectId")
+    public DashboardData getDashboard(UUID tenantId, @Nullable UUID projectId) {
         var now = Instant.now();
         var thirtyDaysAgo = now.minus(30, ChronoUnit.DAYS);
 
         // Get velocity trends
-        var decisionTrend = getDecisionVelocityTrend(tenantId, 30);
-        var outcomeTrend = getOutcomeVelocityTrend(tenantId, 30);
+        var decisionTrend = getDecisionVelocityTrend(tenantId, projectId, 30);
+        var outcomeTrend = getOutcomeVelocityTrend(tenantId, projectId, 30);
 
         // Calculate averages
-        var avgCycleTime = cycleLogRepository.findAvgCycleTimeSince(tenantId, thirtyDaysAgo);
-        var escalatedCount = cycleLogRepository.countEscalatedSince(tenantId, thirtyDaysAgo);
+        var avgCycleTime = projectId != null
+            ? cycleLogRepository.findAvgCycleTimeSinceByProject(tenantId, projectId, thirtyDaysAgo)
+            : cycleLogRepository.findAvgCycleTimeSince(tenantId, thirtyDaysAgo);
+        var escalatedCount = projectId != null
+            ? cycleLogRepository.countEscalatedSinceByProject(tenantId, projectId, thirtyDaysAgo)
+            : cycleLogRepository.countEscalatedSince(tenantId, thirtyDaysAgo);
 
         // Outcomes this week
         var weekStart = LocalDate.now().minusDays(7);
@@ -77,10 +82,12 @@ public class DashboardService {
         );
     }
 
-    @Cacheable(value = AppConstants.CACHE_DASHBOARD, key = "'summary:' + #tenantId")
-    public Map<String, Object> getDashboardSummary(UUID tenantId) {
+    @Cacheable(value = AppConstants.CACHE_DASHBOARD, key = "'summary:' + #tenantId + ':' + #projectId")
+    public Map<String, Object> getDashboardSummary(UUID tenantId, @Nullable UUID projectId) {
         var thirtyDaysAgo = Instant.now().minus(30, ChronoUnit.DAYS);
-        var avgCycleTime = cycleLogRepository.findAvgCycleTimeSince(tenantId, thirtyDaysAgo);
+        var avgCycleTime = projectId != null
+            ? cycleLogRepository.findAvgCycleTimeSinceByProject(tenantId, projectId, thirtyDaysAgo)
+            : cycleLogRepository.findAvgCycleTimeSince(tenantId, thirtyDaysAgo);
 
         return Map.of(
             "avgDecisionTimeHours", avgCycleTime != null ? avgCycleTime : 0.0,
@@ -104,12 +111,14 @@ public class DashboardService {
             .toList();
     }
 
-    private List<DataPoint> getDecisionVelocityTrend(UUID tenantId, int days) {
+    private List<DataPoint> getDecisionVelocityTrend(UUID tenantId, @Nullable UUID projectId, int days) {
         var endDate = LocalDate.now();
         var startDate = endDate.minusDays(days);
 
-        var snapshots = snapshotRepository
-            .findByTenantIdAndMetricTypeAndMetricDateBetweenOrderByMetricDateAsc(
+        var snapshots = projectId != null
+            ? snapshotRepository.findByTenantIdAndProjectIdAndMetricTypeAndMetricDateBetweenOrderByMetricDateAsc(
+                tenantId, projectId, AppConstants.METRIC_DECISION_VELOCITY, startDate, endDate)
+            : snapshotRepository.findByTenantIdAndMetricTypeAndMetricDateBetweenOrderByMetricDateAsc(
                 tenantId, AppConstants.METRIC_DECISION_VELOCITY, startDate, endDate);
 
         return snapshots.stream()
@@ -117,12 +126,14 @@ public class DashboardService {
             .toList();
     }
 
-    private List<DataPoint> getOutcomeVelocityTrend(UUID tenantId, int days) {
+    private List<DataPoint> getOutcomeVelocityTrend(UUID tenantId, @Nullable UUID projectId, int days) {
         var endDate = LocalDate.now();
         var startDate = endDate.minusDays(days);
 
-        var snapshots = snapshotRepository
-            .findByTenantIdAndMetricTypeAndMetricDateBetweenOrderByMetricDateAsc(
+        var snapshots = projectId != null
+            ? snapshotRepository.findByTenantIdAndProjectIdAndMetricTypeAndMetricDateBetweenOrderByMetricDateAsc(
+                tenantId, projectId, AppConstants.METRIC_OUTCOME_VELOCITY, startDate, endDate)
+            : snapshotRepository.findByTenantIdAndMetricTypeAndMetricDateBetweenOrderByMetricDateAsc(
                 tenantId, AppConstants.METRIC_OUTCOME_VELOCITY, startDate, endDate);
 
         return snapshots.stream()

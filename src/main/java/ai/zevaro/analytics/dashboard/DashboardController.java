@@ -4,6 +4,7 @@ import ai.zevaro.analytics.config.AppConstants;
 import ai.zevaro.analytics.dashboard.dto.DashboardData;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
+import org.springframework.lang.Nullable;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.Map;
@@ -18,13 +19,15 @@ public class DashboardController {
 
     @GetMapping
     public ResponseEntity<DashboardData> getDashboard(
-            @RequestHeader("X-Tenant-Id") UUID tenantId) {
-        return ResponseEntity.ok(dashboardService.getDashboard(tenantId));
+            @RequestHeader("X-Tenant-Id") UUID tenantId,
+            @RequestParam(required = false) @Nullable UUID projectId) {
+        return ResponseEntity.ok(dashboardService.getDashboard(tenantId, projectId));
     }
 
     @GetMapping("/summary")
     public ResponseEntity<Map<String, Object>> getDashboardSummary(
-            @RequestHeader("X-Tenant-Id") UUID tenantId) {
-        return ResponseEntity.ok(dashboardService.getDashboardSummary(tenantId));
+            @RequestHeader("X-Tenant-Id") UUID tenantId,
+            @RequestParam(required = false) @Nullable UUID projectId) {
+        return ResponseEntity.ok(dashboardService.getDashboardSummary(tenantId, projectId));
     }
 }

@@ -28,6 +28,7 @@ public class OutcomeEventConsumer {
 
             metricsService.recordOutcomeValidated(
                 event.tenantId(),
+                event.projectId(),
                 event.outcomeId(),
                 event.createdAt(),
                 event.validatedAt()

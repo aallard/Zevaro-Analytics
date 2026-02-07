@@ -29,6 +29,7 @@ public class DecisionEventConsumer {
 
             metricsService.recordDecisionResolved(
                 event.tenantId(),
+                event.projectId(),
                 event.decisionId(),
                 event.createdAt(),
                 event.resolvedAt(),

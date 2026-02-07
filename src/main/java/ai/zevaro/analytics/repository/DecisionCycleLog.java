@@ -25,6 +25,9 @@ public class DecisionCycleLog {
     @Column(name = "tenant_id", nullable = false)
     private UUID tenantId;
 
+    @Column(name = "project_id")
+    private UUID projectId;
+
     @Column(name = "decision_id", nullable = false)
     private UUID decisionId;
 

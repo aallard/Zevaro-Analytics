@@ -28,6 +28,7 @@ public class OutcomeInvalidatedEventConsumer {
 
             metricsService.recordOutcomeInvalidated(
                 event.tenantId(),
+                event.projectId(),
                 event.outcomeId(),
                 event.createdAt(),
                 event.invalidatedAt()

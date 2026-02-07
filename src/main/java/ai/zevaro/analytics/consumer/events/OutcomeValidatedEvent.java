@@ -5,6 +5,7 @@ import java.util.UUID;
 
 public record OutcomeValidatedEvent(
     UUID tenantId,
+    UUID projectId,
     UUID outcomeId,
     String title,
     UUID validatedBy,

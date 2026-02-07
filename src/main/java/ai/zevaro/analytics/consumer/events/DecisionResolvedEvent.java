@@ -5,6 +5,7 @@ import java.util.UUID;
 
 public record DecisionResolvedEvent(
     UUID tenantId,
+    UUID projectId,
     UUID decisionId,
     String title,
     String priority,

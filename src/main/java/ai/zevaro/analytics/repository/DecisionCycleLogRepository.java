@@ -33,4 +33,20 @@ public interface DecisionCycleLogRepository extends JpaRepository<DecisionCycleL
     List<Object[]> findAvgCycleTimeByStakeholder(
         @Param("tenantId") UUID tenantId,
         @Param("since") Instant since);
+
+    List<DecisionCycleLog> findByTenantIdAndProjectId(UUID tenantId, UUID projectId);
+
+    @Query("SELECT AVG(d.cycleTimeHours) FROM DecisionCycleLog d " +
+           "WHERE d.tenantId = :tenantId AND d.projectId = :projectId AND d.resolvedAt >= :since")
+    Double findAvgCycleTimeSinceByProject(
+        @Param("tenantId") UUID tenantId,
+        @Param("projectId") UUID projectId,
+        @Param("since") Instant since);
+
+    @Query("SELECT COUNT(d) FROM DecisionCycleLog d " +
+           "WHERE d.tenantId = :tenantId AND d.projectId = :projectId AND d.wasEscalated = true AND d.resolvedAt >= :since")
+    Long countEscalatedSinceByProject(
+        @Param("tenantId") UUID tenantId,
+        @Param("projectId") UUID projectId,
+        @Param("since") Instant since);
 }
