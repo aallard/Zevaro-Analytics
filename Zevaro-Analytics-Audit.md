@@ -1,565 +1,652 @@
-# Zevaro-Analytics Code Audit & Review
+# Zevaro-Analytics Comprehensive Audit
 
-**Project:** Zevaro Analytics
-**Version:** 1.0.0
-**Java:** 21 (LTS)
-**Spring Boot:** 3.3.0
-**Total Lines of Code:** ~1,818 lines
-**Number of Classes/Beans:** 22 total, 17 Spring beans
-**Audit Date:** 2026-01-31
+**Audit Date:** 2026-02-08
+**Project Version:** 1.0.0
+**Repository:** /Users/adamallard/Documents/GitHub/Zevaro-Analytics
 
 ---
 
-## Executive Summary
+## 1. Project Overview
 
-The Zevaro-Analytics project is a **metrics, dashboards, reports, and insights service** for the Zevaro decision management platform. Overall code quality is **MODERATE** with several areas requiring immediate attention, particularly around the identified Kafka logging issue and missing error handling.
+Zevaro-Analytics is a standalone analytics microservice for the Zevaro COE (Center of Excellence) Platform. It consumes domain events from the Zevaro-Core service via Kafka, computes metrics (decision velocity, outcome velocity, stakeholder response times, hypothesis throughput), persists time-series snapshots, and exposes dashboards, reports, and AI-generated insights through a REST API.
 
-### Summary Table
-
-| Category | Issue Count | Critical | High | Medium | Low |
-|----------|-------------|----------|------|--------|-----|
-| **Kafka Integration** | 4 | 2 | 1 | 1 | 0 |
-| **Error Handling** | 3 | 1 | 2 | 0 | 0 |
-| **Data Validation** | 1 | 0 | 1 | 0 | 0 |
-| **Performance** | 4 | 0 | 0 | 4 | 0 |
-| **Database** | 3 | 0 | 0 | 2 | 1 |
-| **API Design** | 2 | 0 | 1 | 1 | 0 |
-| **Testing** | 1 | 0 | 1 | 0 | 0 |
-| **Configuration** | 3 | 0 | 0 | 2 | 1 |
-| **Code Quality** | 4 | 0 | 0 | 2 | 2 |
-| **Documentation** | 1 | 0 | 0 | 1 | 0 |
-| **TOTAL** | **26** | **3** | **6** | **13** | **4** |
+| Property | Value |
+|---|---|
+| Group ID | `ai.zevaro` |
+| Artifact ID | `zevaro-analytics` |
+| Version | `1.0.0` |
+| Language | Java 21 (configured in pom.xml; runtime Docker image uses Eclipse Temurin 21) |
+| Framework | Spring Boot 3.3.0 |
+| Build Tool | Maven 3.9+ (Maven wrapper included) |
+| Server Port | 8081 |
+| Base Package | `ai.zevaro.analytics` |
+| License | AGPL-3.0-or-later (dual-licensed with commercial option) |
 
 ---
 
-## 1. Project Structure & Architecture
+## 2. Architecture
 
-### Overview
-
-The project follows a **layered architecture pattern**:
-- **Controllers** (API layer): Dashboard, Metrics, Reports, Insights, Internal
-- **Services** (Business logic): Dashboard, Metrics, Reports, Insights
-- **Repositories** (Data access): JPA-based repositories
-- **Config** (Configuration): Kafka, Cache, Constants
-- **DTOs** (Data transfer): Dashboard, Metrics, Reports, Insights models
-- **Consumers** (Event processing): Kafka listeners for 3 event types
-
-### File Structure
+### 2.1 Package Structure
 
 ```
-src/main/java/ai/zevaro/analytics/
-├── ZevaroAnalyticsApplication.java (Main entry point)
-├── config/
-│   ├── AppConstants.java (24 lines)
-│   ├── KafkaConsumerConfig.java (50 lines) ⚠️ CRITICAL ISSUES
-│   └── CacheConfig.java (39 lines)
-├── consumer/ (3 consumers)
-│   ├── DecisionEventConsumer.java (33 lines)
-│   ├── OutcomeEventConsumer.java (29 lines)
-│   ├── HypothesisEventConsumer.java (32 lines)
-│   └── events/ (3 event records)
-├── repository/ (3 repositories + 3 entities)
-├── dashboard/, metrics/, reports/, insights/ (Controllers + Services)
-└── internal/
+ai.zevaro.analytics/
+  ZevaroAnalyticsApplication.java         # Entry point (@SpringBootApplication, @EnableCaching, @EnableKafka, @EnableScheduling)
+
+  config/
+    AppConstants.java                      # Static constants (API paths, Kafka topics, cache names, metric types)
+    CacheConfig.java                       # Redis cache manager with per-cache TTL settings
+    KafkaConsumerConfig.java               # Kafka consumer factory with defensive backoff settings
+    KafkaHealthIndicator.java              # Custom actuator health indicator for Kafka with rate-limited logging
+    RestTemplateConfig.java                # RestTemplate bean with 5s connect / 10s read timeouts
+
+  client/
+    CoreServiceClient.java                 # REST client for Zevaro-Core (fetches live data: decisions, stakeholders, outcomes, hypotheses)
+    dto/
+      CorePageResponse.java                # Paginated response wrapper from Core
+      CoreListResponse.java                # List response wrapper from Core
+      CoreDecisionSummary.java             # Decision summary DTO from Core
+      CoreStakeholderInfo.java             # Stakeholder info DTO from Core
+      CoreOutcomeInfo.java                 # Outcome info DTO from Core
+
+  consumer/
+    DecisionEventConsumer.java             # Kafka listener for decision.resolved events
+    OutcomeEventConsumer.java              # Kafka listener for outcome.validated events
+    OutcomeInvalidatedEventConsumer.java   # Kafka listener for outcome.invalidated events
+    HypothesisEventConsumer.java           # Kafka listener for hypothesis.concluded events
+    RateLimitedConsumerLogger.java         # Shared utility for rate-limited logging across consumers
+    events/
+      DecisionResolvedEvent.java           # Inbound Kafka event record
+      OutcomeValidatedEvent.java           # Inbound Kafka event record
+      OutcomeInvalidatedEvent.java         # Inbound Kafka event record
+      HypothesisConcludedEvent.java        # Inbound Kafka event record
+
+  metrics/
+    MetricsService.java                    # Business logic for recording metric events into DB
+    MetricsController.java                 # REST controller for reading metrics
+    dto/
+      DecisionVelocityMetric.java          # Response DTO
+      OutcomeVelocityMetric.java           # Response DTO (defined but not used in controller; outcome-velocity returns Map)
+      StakeholderResponseMetric.java       # Response DTO
+      HypothesisThroughputMetric.java      # Response DTO
+
+  dashboard/
+    DashboardController.java               # REST controller for dashboard endpoints
+    DashboardService.java                  # Aggregates data from repositories + Core for dashboard
+    dto/
+      DashboardData.java                   # Main dashboard response record
+      DataPoint.java                       # (date, value) pair for charts
+      DecisionSummary.java                 # Urgent decision summary
+      StakeholderScore.java                # Stakeholder leaderboard entry
+
+  reports/
+    ReportController.java                  # REST controller for report endpoints
+    ReportService.java                     # Generates and persists weekly digest and outcome reports
+    dto/
+      WeeklyDigestReport.java              # Weekly digest response record
+      OutcomeReport.java                   # Outcome report response record
+      TimelineEvent.java                   # Timeline entry within reports
+      KeyResultProgress.java               # Key result progress (defined but not populated)
+
+  insights/
+    InsightsController.java                # REST controller for insights/trends/recommendations
+    InsightsService.java                   # Detects trends, bottlenecks, achievements, generates recommendations
+    dto/
+      Insight.java                         # Insight response record
+      InsightType.java                     # Enum: TREND, BOTTLENECK, ANOMALY, RECOMMENDATION, ACHIEVEMENT
+      Trend.java                           # Trend response record
+      TrendDirection.java                  # Enum: UP, DOWN, STABLE
+
+  internal/
+    InternalMetricsController.java         # Internal POST endpoints (alternative to Kafka for Core-to-Analytics metrics push)
+
+  repository/
+    MetricSnapshot.java                    # JPA entity for time-series metric snapshots
+    MetricSnapshotRepository.java          # Spring Data JPA repository
+    DecisionCycleLog.java                  # JPA entity for individual decision cycle time records
+    DecisionCycleLogRepository.java        # Spring Data JPA repository with custom JPQL queries
+    Report.java                            # JPA entity for persisted reports (JSONB data)
+    ReportRepository.java                  # Spring Data JPA repository
 ```
 
-### Strengths
+### 2.2 Layered Architecture
 
-- Clean separation of concerns with distinct layers
-- Proper use of Spring stereotypes (@Repository, @Service, @RestController)
-- Records used for immutable event types
-- Appropriate use of DTOs for API responses
+The service follows a standard layered architecture:
 
----
+1. **Controller Layer** -- REST endpoints (DashboardController, MetricsController, ReportController, InsightsController, InternalMetricsController)
+2. **Service Layer** -- Business logic (DashboardService, MetricsService, ReportService, InsightsService)
+3. **Consumer Layer** -- Kafka event consumers (DecisionEventConsumer, OutcomeEventConsumer, HypothesisEventConsumer, OutcomeInvalidatedEventConsumer)
+4. **Client Layer** -- REST client to Core service (CoreServiceClient)
+5. **Repository Layer** -- JPA repositories (MetricSnapshotRepository, DecisionCycleLogRepository, ReportRepository)
+6. **Configuration Layer** -- Spring configs (CacheConfig, KafkaConsumerConfig, RestTemplateConfig, KafkaHealthIndicator, AppConstants)
 
-## 2. Configuration & Security
+### 2.3 Data Flow
 
-### 2.1 Application Configuration Analysis
-
-**File:** `src/main/resources/application.yml`
-
-| Issue | Severity | Location | Details |
-|-------|----------|----------|---------|
-| DDL Auto Mode Set to 'update' | MEDIUM | `application.yml:16` | Using `update` mode enables automatic schema migration in production, which can corrupt data. Should be `validate` in production. |
-| Environment Variables Not Documented | MEDIUM | `application.yml` | Missing explicit documentation for required environment variables |
-| Default Passwords in Config | LOW | `application.yml:11-12` | Defaults to `zevaro:zevaro` for DB - acceptable for dev but should be documented |
-
-**Security Strengths:**
-- Proper use of environment variables for sensitive data
-- Actuator endpoints limited to health, info, metrics
-- Health details restricted to authorized access
-- JSON deserialization trusted packages configured
-
-### 2.2 Kafka Security Configuration Issues
-
-**File:** `src/main/java/ai/zevaro/analytics/config/KafkaConsumerConfig.java`
-
-| Issue | Severity | Details |
-|-------|----------|---------|
-| Missing Kafka Connection Timeout | CRITICAL | No `session.timeout.ms`, `request.timeout.ms` configured |
-| Missing Heartbeat Configuration | CRITICAL | No `heartbeat.interval.ms` configured |
-| Missing Retry/Backoff Configuration | CRITICAL | No exponential backoff, no max retry time |
-| Hard-coded Concurrency=3 | MEDIUM | 3 threads × 3 listeners = 9 consumers with NO backoff (primary cause of log flooding) |
-| No Error Handler Configured | HIGH | Missing `ContainerProperties.setCommonErrorHandler()` |
-
-### 2.3 Cache Configuration
-
-**File:** `src/main/java/ai/zevaro/analytics/config/CacheConfig.java`
-
-- Dashboard cache: 1-minute TTL (Good for real-time)
-- Metrics cache: 5-minute TTL (Good for aggregated data)
-- Reports cache: 1-hour TTL (Good for stable reports)
-- Default: 5-minute TTL
-
----
-
-## 3. Code Quality
-
-### 3.1 Design Patterns
-
-**Implemented Patterns:**
-
-| Pattern | Location | Effectiveness |
-|---------|----------|----------------|
-| Repository Pattern | `repository/` | Excellent |
-| Service Layer | `*Service.java` | Good |
-| DTO Pattern | `*/dto/` | Good |
-| Dependency Injection | Throughout | Excellent |
-
-**Missing Patterns:**
-
-| Pattern | Benefit | Priority |
-|---------|---------|----------|
-| Exception Handler | Centralized error handling | HIGH |
-| Circuit Breaker | Fault tolerance for Kafka | HIGH |
-| Retry Logic | Graceful degradation | HIGH |
-
-### 3.2 Error Handling - CRITICAL GAPS
-
-**No exception handling in any Kafka consumer:**
-
-```java
-// DecisionEventConsumer.java - NO TRY-CATCH
-@KafkaListener(topics = AppConstants.TOPIC_DECISION_RESOLVED)
-public void onDecisionResolved(DecisionResolvedEvent event) {
-    log.info("Decision resolved: {} for tenant {}", ...);
-    metricsService.recordDecisionResolved(...);  // If this throws, consumer dies
-}
 ```
+Zevaro-Core ---[Kafka events]--> Consumer layer --> MetricsService --> Database (analytics schema)
+                                                                    --> CacheEvict (Redis)
 
-**Failure Scenarios (No Handling):**
-1. Deserialization Failure → `ClassCastException`
-2. Database Connection Loss → `DataAccessException`
-3. Constraint Violation → `DataIntegrityViolationException`
-4. Null Values → `NullPointerException`
-5. Timeout → `QueryTimeoutException`
+Zevaro-Core ---[REST /internal/metrics]--> InternalMetricsController --> MetricsService --> Database
 
-**Impact:** Application crashes, requires manual restart, no automatic recovery.
-
-### 3.3 Logging Issues
-
-| Issue | Severity | Details |
-|-------|----------|---------|
-| **CRITICAL: Kafka Logging Flood** | CRITICAL | 9 consumers × 1 retry/second = 9 log entries/second when Kafka unavailable |
-| Missing Error Logging | HIGH | Consumers have no log statements for errors |
-| Missing Performance Metrics | MEDIUM | No timing logs for consumer processing |
-
-### 3.4 Code Duplication
-
-**Duplication Score:** ~15% of codebase (270 lines out of ~1,800)
-
-**High Duplication Areas:**
-1. Dashboard, Metrics, Reports - all do similar trend calculations
-2. Repository query calls - same date range queries repeated
-3. Snapshot-to-DataPoint conversions - done 3+ times
-
----
-
-## 4. Kafka Integration Analysis
-
-### 4.1 Consumer Configuration
-
-| Topic | Consumer | Event Class |
-|-------|----------|-------------|
-| `zevaro.core.decision.resolved` | `DecisionEventConsumer` | `DecisionResolvedEvent` |
-| `zevaro.core.outcome.validated` | `OutcomeEventConsumer` | `OutcomeValidatedEvent` |
-| `zevaro.core.hypothesis.concluded` | `HypothesisEventConsumer` | `HypothesisConcludedEvent` |
-
-### 4.2 Root Cause of Log Flooding Issue
-
-**Current Configuration:**
-```java
-// KafkaConsumerConfig.java - NO explicit retry/backoff settings
-factory.setConcurrency(3);  // 3 threads per consumer
-```
-
-**What Happens When Kafka is Down:**
-
-| Setting | Default | Impact |
-|---------|---------|--------|
-| `session.timeout.ms` | 10,000 | Session expires every 10 seconds |
-| `heartbeat.interval.ms` | 3,000 | Heartbeat every 3 seconds (fails immediately) |
-| `reconnect.backoff.ms` | 50 | Minimum backoff between retries |
-| `reconnect.backoff.max.ms` | 1,000 | Maximum backoff (only 1 second!) |
-| Number of consumers | 9 | 3 listeners × 3 threads each |
-
-**Result:**
-```
-9 consumers × 1 retry per second = 9 ERROR/WARN lines per second
-Over 1 minute: 540 log entries
-Over 1 hour: 32,400 log entries
+Zevaro-Web ---[REST /api/v1/*]--> Controller layer --> Service layer --> Repository layer (local DB)
+                                                                     --> CoreServiceClient (remote REST to Core)
+                                                                     --> Redis cache
 ```
 
 ---
 
-## 5. Database/Data Layer
+## 3. Dependencies
 
-### 5.1 Entity Design
+### 3.1 Spring Boot Starters (managed by parent 3.3.0)
 
-| Entity | Table | Schema | Status |
-|--------|-------|--------|--------|
-| `DecisionCycleLog` | `decision_cycle_log` | `analytics` | Good indexes |
-| `MetricSnapshot` | `metric_snapshots` | `analytics` | Good unique constraint |
-| `Report` | `reports` | `analytics` | Adequate |
+| Dependency | Purpose |
+|---|---|
+| `spring-boot-starter-web` | REST API (embedded Tomcat) |
+| `spring-boot-starter-data-jpa` | JPA/Hibernate ORM |
+| `spring-boot-starter-validation` | Bean validation |
+| `spring-boot-starter-actuator` | Health, info, metrics endpoints |
+| `spring-boot-starter-data-redis` | Redis connectivity |
+| `spring-boot-starter-cache` | Caching abstraction |
+| `spring-kafka` | Kafka consumer/listener |
 
-### 5.2 Repository Issues
+### 3.2 Runtime Dependencies
 
-| Issue | Severity | Details |
-|-------|----------|---------|
-| Object[] Results | MEDIUM | `findAvgCycleTimeByStakeholder()` returns `List<Object[]>` requiring casting |
-| Missing @Transactional | LOW | Query methods should have `@Transactional(readOnly = true)` |
-| No Pagination | MEDIUM | Large result sets could cause memory issues |
+| Dependency | Purpose |
+|---|---|
+| `postgresql` (runtime scope) | PostgreSQL JDBC driver |
 
-### 5.3 Data Validation - MISSING
+### 3.3 Compile Dependencies
 
-| Layer | Validation | Status |
-|-------|-----------|--------|
-| Database Level | NOT NULL constraints | Implemented |
-| Entity Level | @NotNull annotations | MISSING |
-| DTO Level | @Valid annotations | MISSING |
-| Request Level | Input validation | MISSING |
+| Dependency | Purpose |
+|---|---|
+| `lombok` (optional) | Annotation-based boilerplate reduction |
+
+### 3.4 Test Dependencies
+
+| Dependency | Purpose |
+|---|---|
+| `spring-boot-starter-test` | JUnit 5, Mockito, MockMvc, AssertJ |
+| `spring-kafka-test` | Kafka testing utilities |
+
+### 3.5 Notable Missing Dependencies
+
+- **Elasticsearch** -- Referenced in CONVENTIONS.md as part of the tech stack but no Elasticsearch dependency exists in pom.xml and no Elasticsearch configuration or code exists.
+- **Spring Security** -- No security dependency at all. All endpoints are unauthenticated.
+- **Flyway/Liquibase** -- No database migration tool. Schema managed by `hibernate.ddl-auto: update`.
 
 ---
 
-## 6. API Design
+## 4. Domain Model
 
-### 6.1 REST Endpoints
+### 4.1 JPA Entities
 
-| Endpoint | Method | Caching | Auth |
-|----------|--------|---------|------|
-| `/api/v1/dashboard` | GET | 1-min | Header |
-| `/api/v1/dashboard/summary` | GET | 1-min | Header |
-| `/api/v1/metrics/decision-velocity` | GET | 5-min | Header |
-| `/api/v1/metrics/outcome-velocity` | GET | 5-min | Header |
-| `/api/v1/metrics/stakeholder-response` | GET | 5-min | Header |
-| `/api/v1/metrics/hypothesis-throughput` | GET | 5-min | Header |
-| `/api/v1/metrics/pipeline-idle-time` | GET | 5-min | Header |
-| `/api/v1/reports` | GET | None | Header |
-| `/api/v1/reports/weekly-digest` | GET | 1-hour | Header |
-| `/api/v1/insights` | GET | 5-min | Header |
-| `/api/v1/insights/trends` | GET | Computed | Header |
-| `/api/v1/insights/recommendations` | GET | Computed | Header |
-| `/api/v1/internal/metrics/*` | POST | None | Internal |
+#### MetricSnapshot (table: analytics.metric_snapshots)
 
-**Strengths:**
-- Consistent versioning (`/api/v1`)
-- Resource-based endpoints
-- Tenant isolation via header (`X-Tenant-Id`)
-- Caching strategy aligned with data freshness
+| Field | Type | Column | Constraints |
+|---|---|---|---|
+| id | UUID | id | PK, auto-generated |
+| tenantId | UUID | tenant_id | NOT NULL |
+| projectId | UUID | project_id | nullable |
+| metricType | String(50) | metric_type | NOT NULL |
+| metricDate | LocalDate | metric_date | NOT NULL |
+| value | BigDecimal(15,4) | value | NOT NULL |
+| dimensions | Map<String,Object> | dimensions (JSONB) | nullable |
+| createdAt | Instant | created_at | defaults to now |
 
-### 6.2 Hardcoded Placeholder Data - HIGH PRIORITY
+**Unique constraint:** (tenant_id, metric_type, metric_date)
+**Index:** idx_metric_tenant_type_date on (tenant_id, metric_type, metric_date)
 
-**File:** `DashboardService.java`
+#### DecisionCycleLog (table: analytics.decision_cycle_log)
 
-```java
-return new DashboardData(
-    0,  // decisionsPendingCount - placeholder
-    avgCycleTime != null ? avgCycleTime : 0.0,
-    outcomesThisWeek,
-    0,  // hypothesesTestedThisWeek - placeholder
-    0,  // experimentsRunning - placeholder
-    healthStatus,
-    List.of(),  // urgentDecisions - placeholder
-    decisionTrend,
-    outcomeTrend,
-    leaderboard,
-    "IDLE",  // pipelineStatus - placeholder
-    null,    // lastDeployment - placeholder
-    0        // idleTimeMinutes - placeholder
-);
+| Field | Type | Column | Constraints |
+|---|---|---|---|
+| id | UUID | id | PK, auto-generated |
+| tenantId | UUID | tenant_id | NOT NULL |
+| projectId | UUID | project_id | nullable |
+| decisionId | UUID | decision_id | NOT NULL |
+| createdAt | Instant | created_at | NOT NULL |
+| resolvedAt | Instant | resolved_at | NOT NULL |
+| cycleTimeHours | BigDecimal(10,2) | cycle_time_hours | NOT NULL |
+| priority | String(20) | priority | nullable |
+| decisionType | String(50) | decision_type | nullable |
+| wasEscalated | Boolean | was_escalated | defaults to false |
+| stakeholderId | UUID | stakeholder_id | nullable |
+
+**Indexes:** idx_cycle_tenant_resolved on (tenant_id, resolved_at), idx_cycle_stakeholder on (stakeholder_id)
+
+#### Report (table: analytics.reports)
+
+| Field | Type | Column | Constraints |
+|---|---|---|---|
+| id | UUID | id | PK, auto-generated |
+| tenantId | UUID | tenant_id | NOT NULL |
+| reportType | String(50) | report_type | NOT NULL |
+| periodStart | LocalDate | period_start | NOT NULL |
+| periodEnd | LocalDate | period_end | NOT NULL |
+| data | Map<String,Object> | data (JSONB) | NOT NULL |
+| generatedAt | Instant | generated_at | defaults to now |
+
+**Index:** idx_reports_tenant_type on (tenant_id, report_type, period_start, period_end)
+
+### 4.2 DTO Records (Response Models)
+
+- **DashboardData** -- Composite dashboard with summary cards, health status, urgent decisions, velocity trends, stakeholder leaderboard, pipeline status
+- **DataPoint(date, value)** -- Chart data point
+- **DecisionSummary(id, title, priority, ownerName, waitingHours, blockedItemsCount)** -- Urgent decision
+- **StakeholderScore(stakeholderId, name, avgResponseTimeHours, decisionsCompleted, slaComplianceRate, rank)** -- Leaderboard entry
+- **DecisionVelocityMetric** -- Per-day decision velocity with breakdowns
+- **OutcomeVelocityMetric** -- Per-day outcome validation counts
+- **StakeholderResponseMetric** -- Per-stakeholder response time with period
+- **HypothesisThroughputMetric** -- Per-day hypothesis counts with validation rate
+- **WeeklyDigestReport** -- Full weekly digest with trends, highlights, concerns
+- **OutcomeReport** -- Outcome-specific report with decisions, hypotheses, key results, timeline
+- **TimelineEvent(timestamp, eventType, description)** -- Report timeline entry
+- **KeyResultProgress(title, targetValue, currentValue, unit, progressPercent)** -- Defined but always empty
+- **Insight(type, title, description, recommendation, confidence, generatedAt)** -- AI insight
+- **Trend(metricName, direction, percentChange, periodDays, isSignificant)** -- Detected trend
+
+### 4.3 Kafka Event Records (Inbound)
+
+- **DecisionResolvedEvent** -- tenantId, projectId, decisionId, title, priority, decisionType, resolvedBy, stakeholderId, wasEscalated, createdAt, resolvedAt
+- **OutcomeValidatedEvent** -- tenantId, projectId, outcomeId, title, validatedBy, createdAt, validatedAt
+- **OutcomeInvalidatedEvent** -- tenantId, projectId, outcomeId, title, invalidatedBy, createdAt, invalidatedAt
+- **HypothesisConcludedEvent** -- tenantId, projectId, hypothesisId, outcomeId, result, createdAt, concludedAt
+
+### 4.4 Internal Request Records
+
+- **DecisionResolvedRequest** -- mirrors DecisionResolvedEvent fields
+- **OutcomeValidatedRequest** -- mirrors OutcomeValidatedEvent fields
+- **HypothesisConcludedRequest** -- mirrors HypothesisConcludedEvent fields
+
+### 4.5 Core Service Client DTOs
+
+- **CorePageResponse(totalElements, totalPages, size, number)** -- Paginated wrapper
+- **CoreListResponse<T>(content, totalElements)** -- List wrapper
+- **CoreDecisionSummary** -- id, title, priority, status, ownerId, ownerName, createdAt, blockedItemsCount
+- **CoreStakeholderInfo** -- id, name, email, role, decisionsPending, decisionsCompleted
+- **CoreOutcomeInfo** -- id, title, status, successCriteria, createdAt, validatedAt, ownerId
+
+---
+
+## 5. API Endpoints
+
+All endpoints are prefixed with `/api/v1`. Tenant isolation is achieved via the `X-Tenant-Id` request header.
+
+### 5.1 Dashboard Endpoints
+
+| Method | Path | Description | Auth | Parameters |
+|---|---|---|---|---|
+| GET | /api/v1/dashboard | Full dashboard data | None (header: X-Tenant-Id) | projectId (optional query param) |
+| GET | /api/v1/dashboard/summary | Quick summary (mobile-friendly) | None (header: X-Tenant-Id) | projectId (optional query param) |
+
+### 5.2 Metrics Endpoints
+
+| Method | Path | Description | Auth | Parameters |
+|---|---|---|---|---|
+| GET | /api/v1/metrics/decision-velocity | Decision cycle time trend | None (header: X-Tenant-Id) | projectId (optional), days (default: 30) |
+| GET | /api/v1/metrics/stakeholder-response | Response times by stakeholder | None (header: X-Tenant-Id) | days (default: 30) |
+| GET | /api/v1/metrics/outcome-velocity | Outcomes validated/invalidated | None (header: X-Tenant-Id) | projectId (optional), days (default: 30) |
+| GET | /api/v1/metrics/hypothesis-throughput | Experiments per period | None (header: X-Tenant-Id) | projectId (optional), days (default: 30) |
+| GET | /api/v1/metrics/pipeline-idle-time | Pipeline idle time status | None (header: X-Tenant-Id) | None |
+
+### 5.3 Reports Endpoints
+
+| Method | Path | Description | Auth | Parameters |
+|---|---|---|---|---|
+| GET | /api/v1/reports | List available reports and recent reports | None (header: X-Tenant-Id) | None |
+| GET | /api/v1/reports/weekly-digest | Weekly digest report | None (header: X-Tenant-Id) | weekStart (optional, ISO date) |
+| GET | /api/v1/reports/outcome/{outcomeId} | Outcome-specific report | None (header: X-Tenant-Id) | outcomeId (path) |
+
+### 5.4 Insights Endpoints
+
+| Method | Path | Description | Auth | Parameters |
+|---|---|---|---|---|
+| GET | /api/v1/insights | AI-generated insights | None (header: X-Tenant-Id) | projectId (optional) |
+| GET | /api/v1/insights/trends | Detected trends | None (header: X-Tenant-Id) | projectId (optional) |
+| GET | /api/v1/insights/recommendations | Actionable recommendations | None (header: X-Tenant-Id) | projectId (optional) |
+
+### 5.5 Internal Endpoints (service-to-service)
+
+| Method | Path | Description | Auth | Body |
+|---|---|---|---|---|
+| POST | /api/v1/internal/metrics/decision-resolved | Record decision resolved | None | DecisionResolvedRequest JSON |
+| POST | /api/v1/internal/metrics/outcome-validated | Record outcome validated | None | OutcomeValidatedRequest JSON |
+| POST | /api/v1/internal/metrics/hypothesis-concluded | Record hypothesis concluded | None | HypothesisConcludedRequest JSON |
+
+### 5.6 Actuator Endpoints
+
+| Method | Path | Description |
+|---|---|---|
+| GET | /actuator/health | Health check (includes Kafka health indicator) |
+| GET | /actuator/info | Application info |
+| GET | /actuator/metrics | Micrometer metrics |
+
+---
+
+## 6. Security
+
+### 6.1 Authentication
+
+**There is NO authentication.** The service has no Spring Security dependency, no security configuration, and no token validation. All endpoints are completely open.
+
+### 6.2 Tenant Isolation
+
+Tenant context is provided via the `X-Tenant-Id` HTTP header. Controllers read this header and pass it to service methods, which use it in all database queries.
+
+**Critical security gap:** There is no validation that the caller is authorized for the tenant they claim. Any client can access any tenant's data by setting an arbitrary `X-Tenant-Id` header.
+
+### 6.3 Internal Endpoints
+
+The `/api/v1/internal/metrics/*` POST endpoints are intended for service-to-service communication but have no access restrictions. Any HTTP client can push arbitrary metric data.
+
+### 6.4 Core Service Communication
+
+Communication with Zevaro-Core uses RestTemplate with the `X-Tenant-Id` header. There is no service-to-service authentication (no API keys, no mTLS, no JWT propagation).
+
+---
+
+## 7. Database
+
+### 7.1 Schema
+
+- **Database:** PostgreSQL 16 (shared `zevaro` database)
+- **Schema:** `analytics` (configured via `hibernate.default_schema`)
+- **Init script:** `init-schema.sql` creates `analytics`, `core`, and `integrations` schemas
+
+### 7.2 Tables (Hibernate-managed)
+
+| Table | Entity | Purpose |
+|---|---|---|
+| analytics.metric_snapshots | MetricSnapshot | Time-series metric data (daily granularity) |
+| analytics.decision_cycle_log | DecisionCycleLog | Individual decision cycle time records |
+| analytics.reports | Report | Persisted generated reports (JSONB data) |
+
+### 7.3 Migration Approach
+
+- **DDL strategy:** `hibernate.ddl-auto: update` -- Hibernate auto-creates/alters tables on startup.
+- **No migration tool:** No Flyway, Liquibase, or versioned SQL migrations.
+- The CONVENTIONS.md describes tables with SQL DDL including a `metric_snapshots` unique constraint on `(tenant_id, metric_type, metric_date, dimensions)`, but the actual JPA entity defines the unique constraint on `(tenant_id, metric_type, metric_date)` only (without `dimensions`). This is a mismatch.
+
+### 7.4 JSONB Usage
+
+- `MetricSnapshot.dimensions` -- Stores dimensional breakdown data (e.g., `{"invalidated": 2, "validated": 3}`)
+- `Report.data` -- Stores the full report payload as JSONB
+
+### 7.5 Indexes
+
+All indexes are defined via JPA annotations:
+- `idx_metric_tenant_type_date` on metric_snapshots(tenant_id, metric_type, metric_date)
+- `idx_cycle_tenant_resolved` on decision_cycle_log(tenant_id, resolved_at)
+- `idx_cycle_stakeholder` on decision_cycle_log(stakeholder_id)
+- `idx_reports_tenant_type` on reports(tenant_id, report_type, period_start, period_end)
+
+---
+
+## 8. Event System (Kafka)
+
+### 8.1 Consumed Topics
+
+| Topic | Consumer | Action |
+|---|---|---|
+| zevaro.core.decision.resolved | DecisionEventConsumer | Records decision cycle log + updates daily DECISION_VELOCITY snapshot |
+| zevaro.core.outcome.validated | OutcomeEventConsumer | Increments daily OUTCOME_VELOCITY snapshot |
+| zevaro.core.outcome.invalidated | OutcomeInvalidatedEventConsumer | Increments invalidated count in OUTCOME_VELOCITY dimensions |
+| zevaro.core.hypothesis.concluded | HypothesisEventConsumer | Creates/increments HYPOTHESIS_THROUGHPUT snapshot with validated/invalidated dimensions |
+
+### 8.2 Produced Topics
+
+**None.** This service is a pure consumer. It does not produce any Kafka events.
+
+### 8.3 Consumer Configuration
+
+- **Consumer group:** zevaro-analytics
+- **Auto offset reset:** earliest
+- **Deserializer:** JsonDeserializer with trusted packages `ai.zevaro.*`
+- **Concurrency:** 1 thread per listener (reduced from 3 due to the 278GB log incident)
+- **Conditional on:** `spring.kafka.enabled` property (defaults to true)
+
+### 8.4 Error Handling
+
+- **FixedBackOff:** 3 retries with 5-second intervals, then message is dropped
+- **Non-retryable exceptions:** DeserializationException, JsonParseException, JsonMappingException
+- **Consumer-level:** Each consumer has try-catch with:
+  - DataIntegrityViolationException -- silently ignored (duplicate events)
+  - DataAccessException -- re-thrown for retry
+  - Other Exception -- wrapped in RuntimeException and re-thrown
+- **Rate-limited logging:** RateLimitedConsumerLogger logs one message per 5-minute window per error category
+
+### 8.5 Defensive Settings
+
+- reconnect.backoff.ms: 1000 (default 50ms)
+- reconnect.backoff.max.ms: 60000
+- session.timeout.ms: 30000
+- heartbeat.interval.ms: 10000
+- request.timeout.ms: 40000
+- retry.backoff.ms: 1000
+
+### 8.6 Health Monitoring
+
+KafkaHealthIndicator provides:
+- Actuator health endpoint integration
+- Rate-limited failure logging (first failure immediately, then every 5 minutes)
+- Recovery detection and logging with downtime summary
+- Consecutive failure tracking
+
+---
+
+## 9. Configuration
+
+### 9.1 Application Properties (application.yml)
+
+```yaml
+server.port: 8081
+spring.application.name: zevaro-analytics
+
+# Database
+spring.datasource.url: jdbc:postgresql://${DB_HOST:localhost}:5432/${DB_NAME:zevaro}
+spring.datasource.username: ${DB_USER:zevaro}
+spring.datasource.password: ${DB_PASSWORD:zevaro}
+spring.jpa.hibernate.ddl-auto: update
+spring.jpa.properties.hibernate.default_schema: analytics
+spring.jpa.open-in-view: false
+
+# Redis
+spring.redis.host: ${REDIS_HOST:localhost}
+spring.redis.port: ${REDIS_PORT:6379}
+
+# Kafka
+spring.kafka.enabled: ${KAFKA_ENABLED:true}
+spring.kafka.bootstrap-servers: ${KAFKA_SERVERS:localhost:9092}
+spring.kafka.consumer.group-id: zevaro-analytics
+spring.kafka.consumer.auto-offset-reset: earliest
+spring.kafka.listener.auto-startup: ${KAFKA_AUTO_STARTUP:true}
+
+# Actuator
+management.endpoints.web.exposure.include: health,info,metrics
+management.endpoint.health.show-details: when_authorized
+
+# Core service URL
+services.core.url: ${CORE_SERVICE_URL:http://localhost:8080}
 ```
 
-**Impact:** Returns ~60% placeholder/zero data, giving false impression of functionality.
+### 9.2 Environment Variables
+
+| Variable | Default | Purpose |
+|---|---|---|
+| DB_HOST | localhost | PostgreSQL host |
+| DB_NAME | zevaro | Database name |
+| DB_USER | zevaro | Database username |
+| DB_PASSWORD | zevaro | Database password |
+| REDIS_HOST | localhost | Redis host |
+| REDIS_PORT | 6379 | Redis port |
+| KAFKA_ENABLED | true | Toggle Kafka consumers on/off |
+| KAFKA_SERVERS | localhost:9092 | Kafka bootstrap servers |
+| KAFKA_AUTO_STARTUP | true | Auto-start Kafka listeners |
+| SHOW_SQL | false | Show Hibernate SQL |
+| CORE_SERVICE_URL | http://localhost:8080 | Zevaro-Core base URL |
+
+### 9.3 Caching Strategy (Redis)
+
+| Cache Name | TTL | Purpose |
+|---|---|---|
+| dashboard | 1 minute | Dashboard data (frequently accessed, needs freshness) |
+| metrics | 5 minutes | Metrics queries and insights |
+| reports | 1 hour | Generated reports (expensive computation) |
+
+Serialization: GenericJackson2JsonRedisSerializer
+
+### 9.4 Profiles
+
+No profile-specific configuration files exist (e.g., no application-dev.yml or application-prod.yml), despite the CONVENTIONS.md referencing application-dev.yml.
+
+### 9.5 Docker
+
+- **Dockerfile:** Multi-stage build (Maven 3.9 + Temurin 21 Alpine for build, Temurin 21 JRE Alpine for runtime). Runs as non-root `zevaro` user.
+- **docker-compose.yml:** PostgreSQL 16 Alpine, Redis 7 Alpine, Zookeeper (Confluent 7.5.0), Kafka (Confluent 7.5.0). All with health checks.
 
 ---
 
-## 7. Testing
+## 10. Code Quality Observations
 
-### Test Coverage: NONE
+### 10.1 Strengths
 
-```bash
-$ find src/test -name "*.java"
-# No results
-```
+- **Defensive Kafka configuration.** The 278GB log incident clearly informed thorough defensive settings: backoff tuning, reduced concurrency, rate-limited logging, conditional Kafka enablement, and a custom health indicator. This is well-documented and well-implemented.
+- **Rate-limited logging pattern.** RateLimitedConsumerLogger and the rate-limited logging in CoreServiceClient and KafkaHealthIndicator prevent log storms during outages.
+- **Consistent consumer error handling.** All four Kafka consumers follow the same error handling pattern (DataIntegrityViolation caught silently, DataAccessException re-thrown, general Exception wrapped).
+- **Cache eviction on writes.** MetricsService evicts dashboard cache when new events are recorded, ensuring dashboard freshness.
+- **Immutable DTOs.** All DTOs are Java records, providing immutability and value semantics.
+- **Graceful degradation.** CoreServiceClient returns empty/null/zero defaults when Core is unreachable rather than failing the request.
+- **Good test coverage intent.** The project has 9 test files covering service logic, controllers, and consumer error handling.
 
-**Missing Test Files:**
-- No unit tests for services
-- No integration tests for Kafka consumers
-- No repository tests
-- No controller tests
-- No configuration tests
+### 10.2 Issues and Concerns
 
-**Critical Testing Gaps:**
+#### CRITICAL
 
-| Component | Priority |
-|-----------|----------|
-| `MetricsService` | CRITICAL |
-| `DecisionEventConsumer` | CRITICAL |
-| `DashboardService` | HIGH |
-| `KafkaConsumerConfig` | HIGH |
+1. **No authentication or authorization.** All endpoints are completely open. Any HTTP client can read any tenant's analytics data or push arbitrary metrics via the internal endpoints. This is a significant security vulnerability for a multi-tenant system.
 
----
+2. **No input validation on internal endpoints.** InternalMetricsController accepts POST requests with no @Valid annotations and no validation on any fields. An attacker could push arbitrary data (null tenantIds, negative cycle times, future dates, etc.).
 
-## 8. Performance & Scalability
+3. **`hibernate.ddl-auto: update` in all environments.** There is no environment-specific override for production. Using `update` in production is risky -- Hibernate can add columns/tables but never removes them, and schema changes may not be reversible.
 
-### 8.1 Database Queries
+#### HIGH
 
-**Issues:**
-- Multiple similar queries across services
-- No pagination on range queries
-- Object[] returns instead of proper DTOs
+4. **@EnableKafka is declared in two places.** Both ZevaroAnalyticsApplication.java and KafkaConsumerConfig.java have @EnableKafka. When KAFKA_ENABLED=false, KafkaConsumerConfig is not loaded, but @EnableKafka on the main application class still enables the Kafka auto-configuration infrastructure, which may cause connection attempts. This undermines the conditional toggle.
 
-**Positives:**
-- Proper indexes on (tenant_id, metric_type, metric_date)
-- JSONB for flexible dimensions
+5. **@EnableCaching is declared in two places.** Both ZevaroAnalyticsApplication.java and CacheConfig.java have @EnableCaching. This is redundant but not harmful.
 
-### 8.2 Caching Issues
+6. **MetricSnapshot unique constraint excludes projectId.** The unique constraint is (tenant_id, metric_type, metric_date) but the service now has project-level filtering (projectId). If two different projects record the same metric type on the same date for the same tenant, the second will fail with a constraint violation or silently overwrite the first (depending on whether findByTenantIdAndMetricTypeAndMetricDate is used, which ignores projectId).
 
-- Cache key includes `days` parameter - infinite variations possible
-- No cache invalidation when underlying metrics change
-- Metrics cache NOT evicted when new metrics recorded (stale data)
+7. **Race condition in MetricsService snapshot upserts.** The recordOutcomeValidated, recordOutcomeInvalidated, and recordHypothesisConcluded methods do a read-then-write without pessimistic locking. Under concurrent Kafka event processing, two threads could read the same snapshot, both increment by 1, and one increment would be lost. The @Transactional annotation does not prevent this without SERIALIZABLE isolation or explicit row locking.
 
-### 8.3 Concurrency Issues
+8. **Escalation rate in MetricsController.getStakeholderResponse() is hardcoded, not computed.** The escalation rate is determined by arbitrary thresholds on response time (> 48h -> 0.3, > 24h -> 0.15, else -> 0.05). This is not the actual escalation rate from data.
 
-- 9 Kafka threads competing for default HikariCP pool (10 connections)
-- Potential connection pool exhaustion under load
+#### MEDIUM
 
----
+9. **No @Validated/@Valid on request parameters.** The `days` parameter on metrics endpoints has no bounds checking. A caller could pass days=999999 or days=-1.
 
-## 9. Critical Issues Summary
+10. **Missing logback-spring.xml.** The CONVENTIONS.md mandates a separate Kafka log appender with strict size limits, but no logback configuration file exists in src/main/resources/. The service relies on Spring Boot defaults, which means Kafka log flooding protection described in conventions is not implemented at the log framework level.
 
-### ISSUE #1: KAFKA LOG FLOODING (CRITICAL)
+11. **DataPoint record inconsistency with tests.** The actual DataPoint record is DataPoint(LocalDate date, double value) but test files DashboardControllerTest and ReportControllerTest construct it as new DataPoint("2024-01-01", 5) (String, int). These tests would not compile against the current DataPoint record.
 
-**Root Cause:**
-1. `factory.setConcurrency(3)` creates 3 threads per consumer
-2. 3 consumers × 3 threads = 9 concurrent threads
-3. No retry/backoff configuration → defaults to minimal backoff
-4. Result: **9 log entries per second** when Kafka unavailable
+12. **DashboardServiceTest references methods/fields that do not exist.** The test calls dashboardService.getDashboard(TEST_TENANT_ID) with one argument, but the actual DashboardService.getDashboard() takes two arguments (tenantId, projectId). The test also accesses fields like dashboard.pendingDecisionCount(), dashboard.avgCycleTimeHours(), dashboard.outcomesThisWeek(), dashboard.activeExperiments(), dashboard.healthStatus(), dashboard.leaderboard() -- but the actual DashboardData record uses different names: decisionsPendingCount, avgDecisionWaitHours, outcomesValidatedThisWeek, experimentsRunning, decisionHealthStatus, stakeholderLeaderboard.
 
-### ISSUE #2: MISSING ERROR HANDLING IN KAFKA CONSUMERS (CRITICAL)
+13. **InsightsControllerTest constructs Insight and Trend with wrong field signatures.** The test creates Insight with (UUID, InsightType, String, String, double, Instant) where the first field is a UUID id, but the actual Insight record is (InsightType, String, String, String, double, Instant). Similarly, InsightType values OPPORTUNITY and WARNING used in the test do not exist in the actual InsightType enum (only TREND, BOTTLENECK, ANOMALY, RECOMMENDATION, ACHIEVEMENT). The test Trend constructor uses (String, TrendDirection, double, String) but the actual is (String, TrendDirection, double, int, boolean).
 
-**Impact:**
-- Any deserialization error → Consumer dies
-- Any database error → Consumer dies
-- No automatic recovery
-- Application requires manual restart
+14. **MetricsServiceTest calls recordDecisionResolved with wrong number of arguments.** The test calls it with 8 arguments (missing projectId), but the actual method requires 9 arguments. Similarly, recordOutcomeValidated is called with 4 arguments but the actual method requires 5 (missing projectId). Same for recordHypothesisConcluded and recordOutcomeInvalidated.
 
-### ISSUE #3: MISSING INPUT VALIDATION (HIGH)
+15. **OutcomeInvalidatedEventConsumerTest constructs OutcomeInvalidatedEvent with wrong arguments.** The test passes 6 arguments without projectId, but the actual record has 7 fields including projectId.
 
-**Impact:**
-- Null fields accepted
-- Empty strings accepted
-- Invalid values cause database constraint violations
+16. **DashboardServiceTest references getDashboardSummary(UUID) with one argument, but the actual method takes (UUID, UUID) (tenantId, projectId).**
 
-### ISSUE #4: HARDCODED PLACEHOLDER DATA (HIGH)
+17. **ReportServiceTest accesses wrong field names.** It references report.decisionsResolvedCount(), report.outcomesValidatedCount(), etc., but the actual WeeklyDigestReport uses decisionsResolved, outcomesValidated, etc. Also references report.changePercentFromPreviousWeek() but the actual field is cycleTimeChangePercent. Also references report.title() on OutcomeReport but the actual field is outcomeTitle(). Also references report.totalDecisionsResolved(), report.totalHypothesesTested() but the actual fields are totalDecisions, decisionsResolved, totalHypotheses.
 
-**Impact:**
-- API returns misleading data
-- 60% of dashboard is placeholder data
-- System appears partially functional when not
+18. **OutcomeReport has a suspicious duplicate field.** The constructor in ReportService passes totalDecisions for both totalDecisions and decisionsResolved parameters: `totalDecisions, totalDecisions, avgDecisionTime`. The second should likely be a filtered count, but it is just the same value.
 
-### ISSUE #5: NO TEST COVERAGE (HIGH)
+19. **InsightsService.getRecommendations() does not use projectId for the escalation rate query.** The cycleLogRepository.findByTenantIdAndResolvedAtBetween() call ignores projectId, so recommendations are always tenant-wide even when a project filter is provided.
 
-**Impact:**
-- No confidence in code quality
-- Regressions undetected
-- Refactoring risky
+20. **@Cacheable on controller methods.** MetricsController has @Cacheable directly on REST controller methods. While this works for controller methods (called from outside via proxy), it mixes caching concerns into the controller layer rather than the service layer.
+
+21. **Pipeline idle time is a stub.** MetricsController.getPipelineIdleTime() returns hardcoded idleTimeMinutes: 0 and lastDecisionResolved: Instant.now() with a comment "Requires Elaro integration (ZI-009)".
+
+22. **KeyResultProgress DTO is defined but never populated.** OutcomeReport.keyResults is always List.of() with a comment noting it requires Core service integration.
+
+#### LOW
+
+23. **DashboardData.pipelineStatus, lastDeployment, idleTimeMinutes are always hardcoded.** The DashboardService returns "IDLE", null, and 0 respectively with TODO comments about Elaro integration.
+
+24. **calculateHealthStatus in DashboardService ignores escalatedCount parameter.** The method accepts it but only uses avgCycleTime to determine health status.
+
+25. **SLA compliance rate in buildLeaderboard() is heuristic, not data-driven.** It uses arbitrary response time thresholds (< 24h -> 1.0, < 48h -> 0.75, else -> 0.5) rather than actual SLA definitions.
+
+26. **@EnableScheduling on application class but no scheduled tasks.** No @Scheduled methods exist anywhere in the codebase.
+
+27. **LICENSE file references "Zevaro-Core Licensing" in its header** despite being in the Zevaro-Analytics repository.
+
+28. **.gitignore only contains `target/`.** IDE files, .env, *.log, .DS_Store, and other common exclusions are missing. (.DS_Store files are already present in the repo.)
 
 ---
 
-## 10. Recommendations
+## 11. Known Issues
 
-### CRITICAL (Must Fix Immediately)
+### 11.1 Tests Will Not Compile
 
-#### 1. Fix Kafka Consumer Error Handling
-**Effort:** 2-4 hours
-**Files:** `DecisionEventConsumer.java`, `OutcomeEventConsumer.java`, `HypothesisEventConsumer.java`
+The test files appear to have been written against a different (likely earlier) version of the DTOs and service signatures. Based on the analysis in section 10.2 items 11-17, the following test files have compilation errors:
 
-```java
-@KafkaListener(topics = AppConstants.TOPIC_DECISION_RESOLVED)
-public void onDecisionResolved(DecisionResolvedEvent event) {
-    try {
-        log.info("Decision resolved: {} for tenant {}", event.decisionId(), event.tenantId());
-        metricsService.recordDecisionResolved(...);
-    } catch (DataIntegrityViolationException e) {
-        log.error("Duplicate event for decision {}: {}", event.decisionId(), e.getMessage());
-    } catch (DataAccessException e) {
-        log.error("Database error processing decision event: {}", event.decisionId(), e);
-    } catch (Exception e) {
-        log.error("Unexpected error processing decision event: {}", event.decisionId(), e);
-        throw new RuntimeException("Failed to process decision event", e);
-    }
-}
-```
+- **DashboardControllerTest** -- wrong DataPoint constructor, wrong DashboardService.getDashboard method signature (1 arg vs 2), wrong DashboardService.getDashboardSummary method signature
+- **DashboardServiceTest** -- wrong method signatures, wrong field accessor names on DashboardData
+- **MetricsServiceTest** -- wrong argument count on recordDecisionResolved (8 vs 9), recordOutcomeValidated (4 vs 5), recordHypothesisConcluded (6 vs 7), recordOutcomeInvalidated (4 vs 5)
+- **InsightsControllerTest** -- wrong Insight constructor, non-existent InsightType values, wrong Trend constructor
+- **InsightsServiceTest** -- wrong InsightsService.generateInsights() signature (1 arg vs 2), wrong InsightsService.detectTrends() signature (1 arg vs 2), wrong InsightsService.getRecommendations() signature (1 arg vs 2)
+- **ReportControllerTest** -- wrong DataPoint constructor
+- **ReportServiceTest** -- wrong field accessor names on WeeklyDigestReport and OutcomeReport
+- **OutcomeInvalidatedEventConsumerTest** -- wrong OutcomeInvalidatedEvent constructor (6 args vs 7, missing projectId), wrong MetricsService.recordOutcomeInvalidated arg count (4 vs 5, missing projectId)
 
-#### 2. Fix Kafka Reconnection Configuration
-**Effort:** 1-2 hours
-**File:** `KafkaConsumerConfig.java`
+### 11.2 Missing Features (documented as TODOs in code)
 
-```java
-// Add to consumerFactory() method:
-props.put(ConsumerConfig.SESSION_TIMEOUT_MS_CONFIG, 30000);
-props.put(ConsumerConfig.REQUEST_TIMEOUT_MS_CONFIG, 40000);
-props.put(ConsumerConfig.RECONNECT_BACKOFF_MS_CONFIG, 1000);
-props.put(ConsumerConfig.RECONNECT_BACKOFF_MAX_MS_CONFIG, 60000);
-props.put(ConsumerConfig.HEARTBEAT_INTERVAL_MS_CONFIG, 10000);
+1. **Elaro integration (ZI-009)** -- Pipeline status, last deployment, idle time are all stubbed
+2. **Key results in outcome reports** -- Always empty (List.of())
+3. **Per-priority and per-type breakdowns in decision velocity** -- Always Map.of() in MetricsController
+4. **Stakeholder response metric endpoint does not support projectId filter** -- only tenant-wide
+5. **Elasticsearch integration** -- Referenced in CONVENTIONS.md but not implemented
+6. **Logback configuration file** -- Referenced in CONVENTIONS.md as mandatory but not present
+7. **POST /api/v1/reports/generate endpoint** -- Listed in CONVENTIONS.md but not implemented
 
-// Add error handler:
-factory.setCommonErrorHandler(new DefaultErrorHandler(
-    new FixedBackOff(1000, 3)
-));
+### 11.3 CONVENTIONS.md Drift
 
-// Reduce concurrency:
-factory.setConcurrency(1);  // Changed from 3
-```
+The CONVENTIONS.md describes the intended architecture but has drifted from the actual implementation:
 
-### HIGH (Fix Within 1 Sprint)
+| CONVENTIONS.md Says | Reality |
+|---|---|
+| ElasticsearchConfig.java exists | Not present, no Elasticsearch dependency |
+| MetricsCalculator.java class | Service is called MetricsService.java |
+| ReportGenerator.java class | Service is called ReportService.java |
+| InsightsEngine.java class | Service is called InsightsService.java |
+| TrendDetector.java, RecommendationService.java | Consolidated into InsightsService.java |
+| MetricSnapshotRepository.java only | Additional DecisionCycleLogRepository and ReportRepository exist |
+| Unique constraint includes dimensions | Unique constraint does not include dimensions |
+| application-dev.yml exists | Does not exist |
+| Logback XML configuration mandatory | No logback configuration file exists |
+| POST /api/v1/reports/generate endpoint | Not implemented |
+| GET /api/v1/metrics/pipeline-idle-time functional | Returns hardcoded stub data |
 
-#### 3. Add Input Validation
-**Effort:** 2-3 hours
+### 11.4 MetricSnapshot Unique Constraint vs ProjectId
 
-```java
-public record DecisionResolvedRequest(
-    @NotNull UUID tenantId,
-    @NotNull UUID decisionId,
-    @NotNull Instant createdAt,
-    @NotNull Instant resolvedAt,
-    @NotBlank String priority,
-    @NotBlank String decisionType,
-    boolean wasEscalated,
-    @NotNull UUID stakeholderId
-) {}
-```
+The MetricSnapshot entity has a unique constraint on (tenant_id, metric_type, metric_date) but the service now tracks projectId. The metric recording methods (e.g., recordOutcomeValidated) use findByTenantIdAndMetricTypeAndMetricDate which ignores projectId. This means:
+- Metrics from different projects within the same tenant on the same day will collide
+- The first project to record wins; subsequent projects will increment the same snapshot
+- Project-level metric filtering will return incorrect data
 
-#### 4. Create Global Exception Handler
-**Effort:** 2 hours
+### 11.5 @MockBean Package Path
 
-```java
-@RestControllerAdvice
-public class GlobalExceptionHandler {
-    @ExceptionHandler(MethodArgumentNotValidException.class)
-    public ResponseEntity<Map<String, Object>> handleValidationException(...) { }
-
-    @ExceptionHandler(DataIntegrityViolationException.class)
-    public ResponseEntity<Map<String, String>> handleDataIntegrityViolation(...) { }
-
-    @ExceptionHandler(Exception.class)
-    public ResponseEntity<Map<String, String>> handleGenericException(...) { }
-}
-```
-
-#### 5. Remove/Document Placeholder Data
-**Effort:** 3-4 hours
-
-Options:
-- Return only fields with real data
-- Add a `computed` flag to indicate calculated fields
-- Document which fields are placeholders
-
-### MEDIUM (Fix Within 2 Sprints)
-
-#### 6. Add Test Suite
-**Effort:** 8-12 hours
-
-- `DecisionEventConsumerTest` - Kafka integration test
-- `MetricsServiceTest` - Unit test
-- `DashboardServiceTest` - Unit test
-- `KafkaConsumerConfigTest` - Config validation
-
-#### 7. Fix Cache Invalidation
-**Effort:** 2 hours
-
-```java
-@CacheEvict(value = {
-    AppConstants.CACHE_DASHBOARD,
-    AppConstants.CACHE_METRICS,
-    AppConstants.CACHE_REPORTS
-}, key = "#tenantId")
-public void recordDecisionResolved(...) { }
-```
-
-#### 8. Add API Documentation
-**Effort:** 4-6 hours
-
-Add Springdoc OpenAPI with `@Operation` annotations.
+The test files use org.springframework.boot.test.mock.MockBean which is the old package path. In Spring Boot 3.4+, this was relocated. Since the project uses Spring Boot 3.3.0, this is currently fine but will be an issue on upgrade.
 
 ---
 
-## 11. Best Practices Not Followed
+## 12. File Inventory
 
-| Best Practice | Status |
-|---------------|--------|
-| Circuit Breaker Pattern | MISSING |
-| Distributed Tracing | MISSING |
-| API Rate Limiting | MISSING |
-| Health Checks for Kafka | MISSING |
-| Test Coverage | MISSING (0%) |
-| Dead Letter Queue | MISSING |
-| Pagination | MISSING |
-| Request/Response Versioning | DONE |
+### Source Files (59 total: 39 main + 9 test + 11 config/resource)
 
----
-
-## 12. File Audit Summary
-
-| File | Issues | Priority |
-|------|--------|----------|
-| `KafkaConsumerConfig.java` | 4 Critical | URGENT |
-| `DecisionEventConsumer.java` | 1 Critical | URGENT |
-| `OutcomeEventConsumer.java` | 1 Critical | URGENT |
-| `HypothesisEventConsumer.java` | 1 Critical | URGENT |
-| `MetricsService.java` | 3 Medium | HIGH |
-| `DashboardService.java` | 3 Medium | HIGH |
-| `InternalMetricsController.java` | 2 High | HIGH |
-| `MetricsController.java` | 2 High | HIGH |
-| `ReportService.java` | 1 Medium | MEDIUM |
-| `application.yml` | 2 Medium | MEDIUM |
-
----
-
-## Conclusion
-
-The Zevaro-Analytics project has a **solid architectural foundation** with proper use of Spring Boot patterns, caching strategy, and database design. However, it suffers from **critical production readiness issues**:
-
-1. **Kafka log flooding** - Will cause operational issues when broker unavailable
-2. **Missing error handling** - Application crashes on any error
-3. **No input validation** - Bad data reaches database
-4. **Placeholder data** - API returns misleading information
-5. **No tests** - No confidence in code quality
-
-**Estimated effort to production-ready:**
-- Critical fixes: 6-10 hours
-- High priority: 8-12 hours
-- Medium priority: 16-20 hours
-- **Total: 30-42 hours**
-
-The project is approximately **70% complete** - core functionality exists but needs stabilization and error handling before production deployment.
-
----
-
-## Critical Action Items (Next 48 Hours)
-
-1. **IMMEDIATE:** Fix Kafka consumer error handling - Add try-catch blocks
-2. **IMMEDIATE:** Configure Kafka retry/backoff settings - Reduce concurrency to 1, add explicit backoff
-3. **URGENT:** Add input validation - Prevent constraint violations
-4. **URGENT:** Create global exception handler - Return consistent error responses
+**Main Java files:** 39
+**Test Java files:** 9
+**Configuration:** application.yml, pom.xml, Dockerfile, docker-compose.yml, init-schema.sql
+**Documentation:** README.md, Zevaro-Analytics-CONVENTIONS.md, LICENSE
+**Build:** mvnw, mvnw.cmd, .mvn/wrapper/maven-wrapper.properties
