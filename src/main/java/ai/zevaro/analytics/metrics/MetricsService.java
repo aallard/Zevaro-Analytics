@@ -1,6 +1,7 @@
 package ai.zevaro.analytics.metrics;
 
 import ai.zevaro.analytics.config.AppConstants;
+import ai.zevaro.analytics.consumer.events.*;
 import ai.zevaro.analytics.repository.*;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -25,6 +26,7 @@ public class MetricsService {
 
     private final MetricSnapshotRepository snapshotRepository;
     private final DecisionCycleLogRepository cycleLogRepository;
+    private final AnalyticsEventRepository analyticsEventRepository;
 
     @Transactional
     @CacheEvict(value = AppConstants.CACHE_DASHBOARD, key = "#tenantId")
@@ -191,6 +193,189 @@ public class MetricsService {
 
         log.debug("Recorded outcome invalidation: {}", outcomeId);
     }
+
+    // ── Program events ────────────────────────────────────────────────
+
+    @Transactional
+    @CacheEvict(value = AppConstants.CACHE_DASHBOARD, key = "#event.tenantId()")
+    public void recordProgramCreated(ProgramCreatedEvent event) {
+        var ae = AnalyticsEvent.builder()
+            .tenantId(event.tenantId())
+            .eventType(AppConstants.EVENT_PROGRAM_CREATED)
+            .entityId(event.programId())
+            .eventTimestamp(event.timestamp())
+            .metadata(Map.of(
+                "name", event.name(),
+                "status", event.status(),
+                "createdById", event.createdById().toString()))
+            .build();
+        analyticsEventRepository.save(ae);
+        log.debug("Recorded program created: {}", event.programId());
+    }
+
+    @Transactional
+    @CacheEvict(value = AppConstants.CACHE_DASHBOARD, key = "#event.tenantId()")
+    public void recordProgramStatusChanged(ProgramStatusChangedEvent event) {
+        var ae = AnalyticsEvent.builder()
+            .tenantId(event.tenantId())
+            .eventType(AppConstants.EVENT_PROGRAM_STATUS_CHANGED)
+            .entityId(event.programId())
+            .eventTimestamp(event.timestamp())
+            .metadata(Map.of(
+                "oldStatus", event.oldStatus(),
+                "newStatus", event.newStatus(),
+                "changedById", event.changedById().toString()))
+            .build();
+        analyticsEventRepository.save(ae);
+        log.debug("Recorded program status changed: {} {} -> {}",
+            event.programId(), event.oldStatus(), event.newStatus());
+    }
+
+    // ── Workstream events ────────────────────────────────────────────
+
+    @Transactional
+    @CacheEvict(value = AppConstants.CACHE_DASHBOARD, key = "#event.tenantId()")
+    public void recordWorkstreamCreated(WorkstreamCreatedEvent event) {
+        var ae = AnalyticsEvent.builder()
+            .tenantId(event.tenantId())
+            .eventType(AppConstants.EVENT_WORKSTREAM_CREATED)
+            .entityId(event.workstreamId())
+            .parentId(event.programId())
+            .eventTimestamp(event.timestamp())
+            .metadata(Map.of(
+                "name", event.name(),
+                "mode", event.mode(),
+                "executionMode", event.executionMode(),
+                "createdById", event.createdById().toString()))
+            .build();
+        analyticsEventRepository.save(ae);
+        log.debug("Recorded workstream created: {}", event.workstreamId());
+    }
+
+    @Transactional
+    @CacheEvict(value = AppConstants.CACHE_DASHBOARD, key = "#event.tenantId()")
+    public void recordWorkstreamStatusChanged(WorkstreamStatusChangedEvent event) {
+        var ae = AnalyticsEvent.builder()
+            .tenantId(event.tenantId())
+            .eventType(AppConstants.EVENT_WORKSTREAM_STATUS_CHANGED)
+            .entityId(event.workstreamId())
+            .eventTimestamp(event.timestamp())
+            .metadata(Map.of(
+                "oldStatus", event.oldStatus(),
+                "newStatus", event.newStatus(),
+                "changedById", event.changedById().toString()))
+            .build();
+        analyticsEventRepository.save(ae);
+        log.debug("Recorded workstream status changed: {} {} -> {}",
+            event.workstreamId(), event.oldStatus(), event.newStatus());
+    }
+
+    // ── Specification events ─────────────────────────────────────────
+
+    @Transactional
+    @CacheEvict(value = AppConstants.CACHE_DASHBOARD, key = "#event.tenantId()")
+    public void recordSpecificationCreated(SpecificationCreatedEvent event) {
+        var ae = AnalyticsEvent.builder()
+            .tenantId(event.tenantId())
+            .eventType(AppConstants.EVENT_SPEC_CREATED)
+            .entityId(event.specificationId())
+            .parentId(event.programId())
+            .eventTimestamp(event.timestamp())
+            .metadata(Map.of(
+                "name", event.name(),
+                "workstreamId", event.workstreamId().toString(),
+                "authorId", event.authorId().toString()))
+            .build();
+        analyticsEventRepository.save(ae);
+        log.debug("Recorded specification created: {}", event.specificationId());
+    }
+
+    @Transactional
+    @CacheEvict(value = AppConstants.CACHE_DASHBOARD, key = "#event.tenantId()")
+    public void recordSpecificationStatusChanged(SpecificationStatusChangedEvent event) {
+        var ae = AnalyticsEvent.builder()
+            .tenantId(event.tenantId())
+            .eventType(AppConstants.EVENT_SPEC_STATUS_CHANGED)
+            .entityId(event.specificationId())
+            .eventTimestamp(event.timestamp())
+            .metadata(Map.of(
+                "oldStatus", event.oldStatus(),
+                "newStatus", event.newStatus(),
+                "changedById", event.changedById().toString()))
+            .build();
+        analyticsEventRepository.save(ae);
+        log.debug("Recorded specification status changed: {} {} -> {}",
+            event.specificationId(), event.oldStatus(), event.newStatus());
+    }
+
+    @Transactional
+    @CacheEvict(value = AppConstants.CACHE_DASHBOARD, key = "#event.tenantId()")
+    public void recordSpecificationApproved(SpecificationApprovedEvent event) {
+        var ae = AnalyticsEvent.builder()
+            .tenantId(event.tenantId())
+            .eventType(AppConstants.EVENT_SPEC_APPROVED)
+            .entityId(event.specificationId())
+            .eventTimestamp(event.timestamp())
+            .metadata(Map.of(
+                "approvedById", event.approvedById().toString()))
+            .build();
+        analyticsEventRepository.save(ae);
+        log.debug("Recorded specification approved: {}", event.specificationId());
+    }
+
+    // ── Ticket events ────────────────────────────────────────────────
+
+    @Transactional
+    @CacheEvict(value = AppConstants.CACHE_DASHBOARD, key = "#event.tenantId()")
+    public void recordTicketCreated(TicketCreatedEvent event) {
+        var ae = AnalyticsEvent.builder()
+            .tenantId(event.tenantId())
+            .eventType(AppConstants.EVENT_TICKET_CREATED)
+            .entityId(event.ticketId())
+            .eventTimestamp(event.timestamp())
+            .metadata(Map.of(
+                "workstreamId", event.workstreamId().toString(),
+                "type", event.type(),
+                "severity", event.severity(),
+                "reportedById", event.reportedById().toString()))
+            .build();
+        analyticsEventRepository.save(ae);
+        log.debug("Recorded ticket created: {}", event.ticketId());
+    }
+
+    @Transactional
+    @CacheEvict(value = AppConstants.CACHE_DASHBOARD, key = "#event.tenantId()")
+    public void recordTicketResolved(TicketResolvedEvent event) {
+        var ae = AnalyticsEvent.builder()
+            .tenantId(event.tenantId())
+            .eventType(AppConstants.EVENT_TICKET_RESOLVED)
+            .entityId(event.ticketId())
+            .eventTimestamp(event.timestamp())
+            .metadata(Map.of(
+                "resolution", event.resolution(),
+                "resolvedById", event.resolvedById().toString()))
+            .build();
+        analyticsEventRepository.save(ae);
+        log.debug("Recorded ticket resolved: {}", event.ticketId());
+    }
+
+    @Transactional
+    @CacheEvict(value = AppConstants.CACHE_DASHBOARD, key = "#event.tenantId()")
+    public void recordTicketAssigned(TicketAssignedEvent event) {
+        var ae = AnalyticsEvent.builder()
+            .tenantId(event.tenantId())
+            .eventType(AppConstants.EVENT_TICKET_ASSIGNED)
+            .entityId(event.ticketId())
+            .eventTimestamp(event.timestamp())
+            .metadata(Map.of(
+                "assignedToId", event.assignedToId().toString(),
+                "assignedById", event.assignedById().toString()))
+            .build();
+        analyticsEventRepository.save(ae);
+        log.debug("Recorded ticket assigned: {}", event.ticketId());
+    }
+
+    // ── Existing private methods ─────────────────────────────────────
 
     private void updateDailySnapshot(UUID tenantId, UUID projectId, LocalDate date) {
         var startOfDay = date.atStartOfDay().toInstant(ZoneOffset.UTC);
