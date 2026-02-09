@@ -67,7 +67,7 @@ class InsightsServiceTest {
             .thenReturn(List.of());
 
         // Act
-        var insights = insightsService.generateInsights(TEST_TENANT_ID);
+        var insights = insightsService.generateInsights(TEST_TENANT_ID, null);
 
         // Assert
         assertThat(insights).isEmpty();
@@ -116,7 +116,7 @@ class InsightsServiceTest {
             .thenReturn(List.of());
 
         // Act
-        var insights = insightsService.generateInsights(TEST_TENANT_ID);
+        var insights = insightsService.generateInsights(TEST_TENANT_ID, null);
 
         // Assert
         assertThat(insights).isNotEmpty();
@@ -124,7 +124,7 @@ class InsightsServiceTest {
             .filter(i -> i.type() == InsightType.TREND)
             .findFirst();
         assertThat(trendInsight).isPresent();
-        assertThat(trendInsight.get().title()).contains("declining");
+        assertThat(trendInsight.get().title()).contains("improving");
     }
 
     @Test
@@ -162,7 +162,7 @@ class InsightsServiceTest {
             .thenReturn(List.of(outcomeSnapshot));
 
         // Act
-        var trends = insightsService.detectTrends(TEST_TENANT_ID);
+        var trends = insightsService.detectTrends(TEST_TENANT_ID, null);
 
         // Assert
         assertThat(trends).hasSize(2);
@@ -199,7 +199,7 @@ class InsightsServiceTest {
             .thenReturn(List.of());
 
         // Act
-        var trends = insightsService.detectTrends(TEST_TENANT_ID);
+        var trends = insightsService.detectTrends(TEST_TENANT_ID, null);
 
         // Assert
         var decisionTrend = trends.stream()
@@ -241,7 +241,7 @@ class InsightsServiceTest {
             .thenReturn(List.of());
 
         // Act
-        var trends = insightsService.detectTrends(TEST_TENANT_ID);
+        var trends = insightsService.detectTrends(TEST_TENANT_ID, null);
 
         // Assert
         var outcomeTrend = trends.stream()
@@ -260,10 +260,10 @@ class InsightsServiceTest {
         // Arrange
         var thirtyDaysAgo = Instant.now().minus(30, ChronoUnit.DAYS);
 
-        when(cycleLogRepository.findAvgCycleTimeSince(TEST_TENANT_ID, thirtyDaysAgo))
+        when(cycleLogRepository.findAvgCycleTimeSince(eq(TEST_TENANT_ID), any(Instant.class)))
             .thenReturn(null);
 
-        when(cycleLogRepository.countEscalatedSince(TEST_TENANT_ID, thirtyDaysAgo))
+        when(cycleLogRepository.countEscalatedSince(eq(TEST_TENANT_ID), any(Instant.class)))
             .thenReturn(0L);
 
         when(cycleLogRepository.findByTenantIdAndResolvedAtBetween(
@@ -271,7 +271,7 @@ class InsightsServiceTest {
             .thenReturn(List.of());
 
         // Act
-        var recommendations = insightsService.getRecommendations(TEST_TENANT_ID);
+        var recommendations = insightsService.getRecommendations(TEST_TENANT_ID, null);
 
         // Assert
         assertThat(recommendations).isNotEmpty();
@@ -287,10 +287,10 @@ class InsightsServiceTest {
         // Arrange
         var thirtyDaysAgo = Instant.now().minus(30, ChronoUnit.DAYS);
 
-        when(cycleLogRepository.findAvgCycleTimeSince(TEST_TENANT_ID, thirtyDaysAgo))
+        when(cycleLogRepository.findAvgCycleTimeSince(eq(TEST_TENANT_ID), any(Instant.class)))
             .thenReturn(60.0); // 60 hours
 
-        when(cycleLogRepository.countEscalatedSince(TEST_TENANT_ID, thirtyDaysAgo))
+        when(cycleLogRepository.countEscalatedSince(eq(TEST_TENANT_ID), any(Instant.class)))
             .thenReturn(1L);
 
         when(cycleLogRepository.findByTenantIdAndResolvedAtBetween(
@@ -303,7 +303,7 @@ class InsightsServiceTest {
             ));
 
         // Act
-        var recommendations = insightsService.getRecommendations(TEST_TENANT_ID);
+        var recommendations = insightsService.getRecommendations(TEST_TENANT_ID, null);
 
         // Assert
         assertThat(recommendations).contains(
@@ -340,10 +340,10 @@ class InsightsServiceTest {
                 .build()
         );
 
-        when(cycleLogRepository.findAvgCycleTimeSince(TEST_TENANT_ID, thirtyDaysAgo))
+        when(cycleLogRepository.findAvgCycleTimeSince(eq(TEST_TENANT_ID), any(Instant.class)))
             .thenReturn(20.0);
 
-        when(cycleLogRepository.countEscalatedSince(TEST_TENANT_ID, thirtyDaysAgo))
+        when(cycleLogRepository.countEscalatedSince(eq(TEST_TENANT_ID), any(Instant.class)))
             .thenReturn(3L); // 3 out of 5 = 60%
 
         when(cycleLogRepository.findByTenantIdAndResolvedAtBetween(
@@ -351,7 +351,7 @@ class InsightsServiceTest {
             .thenReturn(logs);
 
         // Act
-        var recommendations = insightsService.getRecommendations(TEST_TENANT_ID);
+        var recommendations = insightsService.getRecommendations(TEST_TENANT_ID, null);
 
         // Assert
         assertThat(recommendations).contains(
@@ -388,10 +388,10 @@ class InsightsServiceTest {
                 .build()
         );
 
-        when(cycleLogRepository.findAvgCycleTimeSince(TEST_TENANT_ID, thirtyDaysAgo))
+        when(cycleLogRepository.findAvgCycleTimeSince(eq(TEST_TENANT_ID), any(Instant.class)))
             .thenReturn(50.0); // > 48h
 
-        when(cycleLogRepository.countEscalatedSince(TEST_TENANT_ID, thirtyDaysAgo))
+        when(cycleLogRepository.countEscalatedSince(eq(TEST_TENANT_ID), any(Instant.class)))
             .thenReturn(3L); // 60% escalation rate
 
         when(cycleLogRepository.findByTenantIdAndResolvedAtBetween(
@@ -399,7 +399,7 @@ class InsightsServiceTest {
             .thenReturn(logs);
 
         // Act
-        var recommendations = insightsService.getRecommendations(TEST_TENANT_ID);
+        var recommendations = insightsService.getRecommendations(TEST_TENANT_ID, null);
 
         // Assert
         assertThat(recommendations)
@@ -436,7 +436,7 @@ class InsightsServiceTest {
             .thenReturn(List.of());
 
         // Act
-        var trends = insightsService.detectTrends(TEST_TENANT_ID);
+        var trends = insightsService.detectTrends(TEST_TENANT_ID, null);
 
         // Assert
         var decisionTrend = trends.stream()

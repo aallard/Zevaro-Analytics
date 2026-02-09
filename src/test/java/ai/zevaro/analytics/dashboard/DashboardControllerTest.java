@@ -9,11 +9,12 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
-import org.springframework.boot.test.mock.MockBean;
+import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 
 import java.time.Instant;
+import java.time.LocalDate;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -46,12 +47,12 @@ class DashboardControllerTest {
 
         List<DecisionSummary> urgentDecisions = List.of();
         List<DataPoint> decisionVelocityTrend = List.of(
-            new DataPoint("2024-01-01", 5),
-            new DataPoint("2024-01-02", 8)
+            new DataPoint(LocalDate.parse("2024-01-01"), 5.0),
+            new DataPoint(LocalDate.parse("2024-01-02"), 8.0)
         );
         List<DataPoint> outcomeVelocityTrend = List.of(
-            new DataPoint("2024-01-01", 2),
-            new DataPoint("2024-01-02", 3)
+            new DataPoint(LocalDate.parse("2024-01-01"), 2.0),
+            new DataPoint(LocalDate.parse("2024-01-02"), 3.0)
         );
         List<StakeholderScore> leaderboard = List.of();
 
@@ -68,14 +69,28 @@ class DashboardControllerTest {
             leaderboard,
             "HEALTHY",
             Instant.now(),
-            0
+            0,
+            // v2 fields
+            5,    // totalWorkstreams
+            3,    // activeWorkstreams
+            Map.of("SCRUM", 3, "KANBAN", 2),  // workstreamsByMode
+            Map.of("AI_FIRST", 2, "TRADITIONAL", 3),  // workstreamsByExecutionMode
+            10,   // totalSpecifications
+            2,    // specificationsPendingReview
+            4,    // specificationsApprovedThisWeek
+            25,   // totalTickets
+            8,    // openTickets
+            Map.of("OPEN", 8, "RESOLVED", 17),  // ticketsByStatus
+            Map.of("HIGH", 5, "MEDIUM", 12, "LOW", 8),  // ticketsBySeverity
+            0,    // totalDocuments
+            0     // publishedDocuments
         );
     }
 
     @Test
     @DisplayName("GET /api/v1/dashboard should return DashboardData with 200 OK")
     void testGetDashboard_ShouldReturn200WithDashboardData() throws Exception {
-        when(dashboardService.getDashboard(tenantId)).thenReturn(dashboardData);
+        when(dashboardService.getDashboard(tenantId, null)).thenReturn(dashboardData);
 
         mockMvc.perform(get("/api/v1/dashboard")
                 .header("X-Tenant-Id", tenantId.toString())
@@ -98,7 +113,7 @@ class DashboardControllerTest {
     @DisplayName("GET /api/v1/dashboard should pass tenantId header correctly")
     void testGetDashboard_ShouldPassTenantIdFromHeader() throws Exception {
         UUID testTenantId = UUID.randomUUID();
-        when(dashboardService.getDashboard(testTenantId)).thenReturn(dashboardData);
+        when(dashboardService.getDashboard(testTenantId, null)).thenReturn(dashboardData);
 
         mockMvc.perform(get("/api/v1/dashboard")
                 .header("X-Tenant-Id", testTenantId.toString())
@@ -117,7 +132,7 @@ class DashboardControllerTest {
             "trend", "IMPROVING"
         );
 
-        when(dashboardService.getDashboardSummary(tenantId)).thenReturn(summaryData);
+        when(dashboardService.getDashboardSummary(tenantId, null)).thenReturn(summaryData);
 
         mockMvc.perform(get("/api/v1/dashboard/summary")
                 .header("X-Tenant-Id", tenantId.toString())
@@ -138,7 +153,7 @@ class DashboardControllerTest {
             "timeRange", "7_DAYS"
         );
 
-        when(dashboardService.getDashboardSummary(any(UUID.class))).thenReturn(summaryData);
+        when(dashboardService.getDashboardSummary(any(UUID.class), any())).thenReturn(summaryData);
 
         mockMvc.perform(get("/api/v1/dashboard/summary")
                 .header("X-Tenant-Id", tenantId.toString()))
@@ -151,7 +166,7 @@ class DashboardControllerTest {
     @Test
     @DisplayName("GET /api/v1/dashboard should include all required fields")
     void testGetDashboard_ShouldIncludeAllRequiredFields() throws Exception {
-        when(dashboardService.getDashboard(any(UUID.class))).thenReturn(dashboardData);
+        when(dashboardService.getDashboard(any(UUID.class), any())).thenReturn(dashboardData);
 
         mockMvc.perform(get("/api/v1/dashboard")
                 .header("X-Tenant-Id", tenantId.toString()))

@@ -172,12 +172,12 @@ class ReportServiceTest {
         assertThat(report.tenantId()).isEqualTo(TEST_TENANT_ID);
         assertThat(report.weekStart()).isEqualTo(weekStart);
         assertThat(report.weekEnd()).isEqualTo(weekEnd);
-        assertThat(report.decisionsResolvedCount()).isEqualTo(2);
-        assertThat(report.decisionsCreatedCount()).isEqualTo(2);
+        assertThat(report.decisionsResolved()).isEqualTo(2);
+        assertThat(report.decisionsCreated()).isEqualTo(2);
         assertThat(report.avgCycleTimeHours()).isEqualTo(11.0);
-        assertThat(report.outcomesValidatedCount()).isEqualTo(5);
-        assertThat(report.outcomesInvalidatedCount()).isEqualTo(1);
-        assertThat(report.hypothesesTestedCount()).isEqualTo(3);
+        assertThat(report.outcomesValidated()).isEqualTo(5);
+        assertThat(report.outcomesInvalidated()).isEqualTo(1);
+        assertThat(report.hypothesesTested()).isEqualTo(3);
         assertThat(report.topStakeholders()).hasSize(2);
 
         verify(reportRepository).save(any(Report.class));
@@ -214,10 +214,10 @@ class ReportServiceTest {
             .thenReturn(List.of(prevWeekLog));
 
         when(snapshotRepository.findByTenantIdAndMetricTypeAndMetricDateBetweenOrderByMetricDateAsc(
-            anyUUID(), anyString(), any(LocalDate.class), any(LocalDate.class)))
+            any(UUID.class), anyString(), any(LocalDate.class), any(LocalDate.class)))
             .thenReturn(List.of());
 
-        when(cycleLogRepository.findAvgCycleTimeByStakeholder(anyUUID(), any(Instant.class)))
+        when(cycleLogRepository.findAvgCycleTimeByStakeholder(any(UUID.class), any(Instant.class)))
             .thenReturn(List.of());
 
         when(coreServiceClient.getDecisionsCreatedCount(TEST_TENANT_ID))
@@ -234,7 +234,7 @@ class ReportServiceTest {
         var report = reportService.generateWeeklyDigest(TEST_TENANT_ID, weekStart);
 
         // Assert
-        assertThat(report.changePercentFromPreviousWeek()).isNegative(); // Improvement = negative change
+        assertThat(report.cycleTimeChangePercent()).isNegative(); // Improvement = negative change
         assertThat(report.highlights()).contains(
             "Decision velocity improved by 50.0% vs last week"
         );
@@ -250,7 +250,7 @@ class ReportServiceTest {
         var startInstant = weekStart.atStartOfDay().toInstant(ZoneOffset.UTC);
         var endInstant = weekEnd.atStartOfDay().toInstant(ZoneOffset.UTC);
 
-        when(cycleLogRepository.findByTenantIdAndResolvedAtBetween(anyUUID(), any(Instant.class), any(Instant.class)))
+        when(cycleLogRepository.findByTenantIdAndResolvedAtBetween(any(UUID.class), any(Instant.class), any(Instant.class)))
             .thenReturn(List.of());
 
         var outcomeSnapshot = MetricSnapshot.builder()
@@ -260,10 +260,10 @@ class ReportServiceTest {
             .build();
 
         when(snapshotRepository.findByTenantIdAndMetricTypeAndMetricDateBetweenOrderByMetricDateAsc(
-            anyUUID(), anyString(), any(LocalDate.class), any(LocalDate.class)))
+            any(UUID.class), anyString(), any(LocalDate.class), any(LocalDate.class)))
             .thenReturn(List.of(outcomeSnapshot));
 
-        when(cycleLogRepository.findAvgCycleTimeByStakeholder(anyUUID(), any(Instant.class)))
+        when(cycleLogRepository.findAvgCycleTimeByStakeholder(any(UUID.class), any(Instant.class)))
             .thenReturn(List.of());
 
         when(coreServiceClient.getDecisionsCreatedCount(TEST_TENANT_ID))
@@ -300,18 +300,18 @@ class ReportServiceTest {
         when(coreServiceClient.getOutcome(TEST_TENANT_ID, TEST_OUTCOME_ID))
             .thenReturn(outcomeInfo);
 
-        when(cycleLogRepository.findByTenantIdAndResolvedAtBetween(anyUUID(), any(Instant.class), any(Instant.class)))
+        when(cycleLogRepository.findByTenantIdAndResolvedAtBetween(any(UUID.class), any(Instant.class), any(Instant.class)))
             .thenReturn(List.of());
 
         when(snapshotRepository.findByTenantIdAndMetricTypeAndMetricDateBetweenOrderByMetricDateAsc(
-            anyUUID(), anyString(), any(LocalDate.class), any(LocalDate.class)))
+            any(UUID.class), anyString(), any(LocalDate.class), any(LocalDate.class)))
             .thenReturn(List.of());
 
         when(coreServiceClient.getActiveHypothesisCount(TEST_TENANT_ID))
             .thenReturn(2);
 
         when(reportRepository.findByTenantIdAndReportTypeAndPeriodStartAndPeriodEnd(
-            anyUUID(), anyString(), any(LocalDate.class), any(LocalDate.class)))
+            any(UUID.class), anyString(), any(LocalDate.class), any(LocalDate.class)))
             .thenReturn(Optional.empty());
 
         when(objectMapper.convertValue(any(), eq(Map.class)))
@@ -323,7 +323,7 @@ class ReportServiceTest {
         // Assert
         assertThat(report).isNotNull();
         assertThat(report.outcomeId()).isEqualTo(TEST_OUTCOME_ID);
-        assertThat(report.title()).isEqualTo("Test Outcome");
+        assertThat(report.outcomeTitle()).isEqualTo("Test Outcome");
         assertThat(report.status()).isEqualTo("VALIDATED");
         assertThat(report.createdAt()).isEqualTo(outcomeInfo.createdAt());
         assertThat(report.validatedAt()).isEqualTo(outcomeInfo.validatedAt());
@@ -354,14 +354,16 @@ class ReportServiceTest {
         var decisionLog1 = DecisionCycleLog.builder()
             .cycleTimeHours(BigDecimal.valueOf(8.0))
             .priority("HIGH")
+            .resolvedAt(now.minusSeconds(3600))
             .build();
 
         var decisionLog2 = DecisionCycleLog.builder()
             .cycleTimeHours(BigDecimal.valueOf(12.0))
             .priority("MEDIUM")
+            .resolvedAt(now.minusSeconds(1800))
             .build();
 
-        when(cycleLogRepository.findByTenantIdAndResolvedAtBetween(TEST_TENANT_ID, createdAt, now))
+        when(cycleLogRepository.findByTenantIdAndResolvedAtBetween(eq(TEST_TENANT_ID), any(Instant.class), any(Instant.class)))
             .thenReturn(List.of(decisionLog1, decisionLog2));
 
         var hypothesisSnapshot1 = MetricSnapshot.builder()
@@ -370,14 +372,14 @@ class ReportServiceTest {
             .build();
 
         when(snapshotRepository.findByTenantIdAndMetricTypeAndMetricDateBetweenOrderByMetricDateAsc(
-            anyUUID(), eq(AppConstants.METRIC_HYPOTHESIS_THROUGHPUT), any(LocalDate.class), any(LocalDate.class)))
+            any(UUID.class), eq(AppConstants.METRIC_HYPOTHESIS_THROUGHPUT), any(LocalDate.class), any(LocalDate.class)))
             .thenReturn(List.of(hypothesisSnapshot1));
 
         when(coreServiceClient.getActiveHypothesisCount(TEST_TENANT_ID))
             .thenReturn(1);
 
         when(reportRepository.findByTenantIdAndReportTypeAndPeriodStartAndPeriodEnd(
-            anyUUID(), anyString(), any(LocalDate.class), any(LocalDate.class)))
+            any(UUID.class), anyString(), any(LocalDate.class), any(LocalDate.class)))
             .thenReturn(Optional.empty());
 
         when(objectMapper.convertValue(any(), eq(Map.class)))
@@ -387,9 +389,9 @@ class ReportServiceTest {
         var report = reportService.generateOutcomeReport(TEST_TENANT_ID, TEST_OUTCOME_ID);
 
         // Assert
-        assertThat(report.totalDecisionsResolved()).isEqualTo(2);
+        assertThat(report.decisionsResolved()).isEqualTo(2);
         assertThat(report.avgDecisionTimeHours()).isEqualTo(10.0);
-        assertThat(report.totalHypothesesTested()).isEqualTo(5);
+        assertThat(report.totalHypotheses()).isEqualTo(5);
         assertThat(report.hypothesesValidated()).isEqualTo(3);
         assertThat(report.hypothesesInvalidated()).isEqualTo(2);
         assertThat(report.hypothesesInProgress()).isEqualTo(1);
@@ -456,14 +458,14 @@ class ReportServiceTest {
             .data(Map.of("old", "data"))
             .build();
 
-        when(cycleLogRepository.findByTenantIdAndResolvedAtBetween(anyUUID(), any(Instant.class), any(Instant.class)))
+        when(cycleLogRepository.findByTenantIdAndResolvedAtBetween(any(UUID.class), any(Instant.class), any(Instant.class)))
             .thenReturn(List.of());
 
         when(snapshotRepository.findByTenantIdAndMetricTypeAndMetricDateBetweenOrderByMetricDateAsc(
-            anyUUID(), anyString(), any(LocalDate.class), any(LocalDate.class)))
+            any(UUID.class), anyString(), any(LocalDate.class), any(LocalDate.class)))
             .thenReturn(List.of());
 
-        when(cycleLogRepository.findAvgCycleTimeByStakeholder(anyUUID(), any(Instant.class)))
+        when(cycleLogRepository.findAvgCycleTimeByStakeholder(any(UUID.class), any(Instant.class)))
             .thenReturn(List.of());
 
         when(coreServiceClient.getDecisionsCreatedCount(TEST_TENANT_ID))
@@ -495,18 +497,18 @@ class ReportServiceTest {
         when(coreServiceClient.getOutcome(TEST_TENANT_ID, TEST_OUTCOME_ID))
             .thenReturn(null);
 
-        when(cycleLogRepository.findByTenantIdAndResolvedAtBetween(anyUUID(), any(Instant.class), any(Instant.class)))
+        when(cycleLogRepository.findByTenantIdAndResolvedAtBetween(any(UUID.class), any(Instant.class), any(Instant.class)))
             .thenReturn(List.of());
 
         when(snapshotRepository.findByTenantIdAndMetricTypeAndMetricDateBetweenOrderByMetricDateAsc(
-            anyUUID(), anyString(), any(LocalDate.class), any(LocalDate.class)))
+            any(UUID.class), anyString(), any(LocalDate.class), any(LocalDate.class)))
             .thenReturn(List.of());
 
         when(coreServiceClient.getActiveHypothesisCount(TEST_TENANT_ID))
             .thenReturn(0);
 
         when(reportRepository.findByTenantIdAndReportTypeAndPeriodStartAndPeriodEnd(
-            anyUUID(), anyString(), any(LocalDate.class), any(LocalDate.class)))
+            any(UUID.class), anyString(), any(LocalDate.class), any(LocalDate.class)))
             .thenReturn(Optional.empty());
 
         when(objectMapper.convertValue(any(), eq(Map.class)))
@@ -518,8 +520,8 @@ class ReportServiceTest {
         // Assert
         assertThat(report).isNotNull();
         assertThat(report.outcomeId()).isEqualTo(TEST_OUTCOME_ID);
-        assertThat(report.title()).isEqualTo("Outcome Report");
+        assertThat(report.outcomeTitle()).isEqualTo("Outcome Report");
         assertThat(report.status()).isEqualTo("UNKNOWN");
-        assertThat(report.totalDecisionsResolved()).isZero();
+        assertThat(report.decisionsResolved()).isZero();
     }
 }

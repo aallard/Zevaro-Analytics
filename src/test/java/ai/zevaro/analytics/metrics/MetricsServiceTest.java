@@ -1,6 +1,7 @@
 package ai.zevaro.analytics.metrics;
 
 import ai.zevaro.analytics.config.AppConstants;
+import ai.zevaro.analytics.repository.AnalyticsEventRepository;
 import ai.zevaro.analytics.repository.DecisionCycleLog;
 import ai.zevaro.analytics.repository.DecisionCycleLogRepository;
 import ai.zevaro.analytics.repository.MetricSnapshot;
@@ -39,10 +40,14 @@ class MetricsServiceTest {
     @Mock
     private DecisionCycleLogRepository cycleLogRepository;
 
+    @Mock
+    private AnalyticsEventRepository analyticsEventRepository;
+
     @InjectMocks
     private MetricsService metricsService;
 
     private static final UUID TEST_TENANT_ID = UUID.randomUUID();
+    private static final UUID TEST_PROJECT_ID = UUID.randomUUID();
     private static final UUID TEST_DECISION_ID = UUID.randomUUID();
     private static final UUID TEST_OUTCOME_ID = UUID.randomUUID();
     private static final UUID TEST_HYPOTHESIS_ID = UUID.randomUUID();
@@ -62,14 +67,13 @@ class MetricsServiceTest {
         var expectedBigDecimal = BigDecimal.valueOf(expectedCycleTimeHours)
             .setScale(2, RoundingMode.HALF_UP);
 
-        when(snapshotRepository.findByTenantIdAndMetricTypeAndMetricDate(anyUUID(), anyString(), any(LocalDate.class)))
-            .thenReturn(Optional.empty());
-        when(cycleLogRepository.findByTenantIdAndResolvedAtBetween(anyUUID(), any(Instant.class), any(Instant.class)))
+        when(cycleLogRepository.findByTenantIdAndResolvedAtBetween(any(UUID.class), any(Instant.class), any(Instant.class)))
             .thenReturn(List.of());
 
         // Act
         metricsService.recordDecisionResolved(
             TEST_TENANT_ID,
+            TEST_PROJECT_ID,
             TEST_DECISION_ID,
             createdAt,
             resolvedAt,
@@ -112,14 +116,15 @@ class MetricsServiceTest {
             .wasEscalated(true)
             .build();
 
-        when(cycleLogRepository.findByTenantIdAndResolvedAtBetween(anyUUID(), any(Instant.class), any(Instant.class)))
+        when(cycleLogRepository.findByTenantIdAndResolvedAtBetween(any(UUID.class), any(Instant.class), any(Instant.class)))
             .thenReturn(List.of(existingLog1, existingLog2));
-        when(snapshotRepository.findByTenantIdAndMetricTypeAndMetricDate(anyUUID(), anyString(), any(LocalDate.class)))
+        when(snapshotRepository.findByTenantIdAndMetricTypeAndMetricDate(any(UUID.class), anyString(), any(LocalDate.class)))
             .thenReturn(Optional.empty());
 
         // Act
         metricsService.recordDecisionResolved(
             TEST_TENANT_ID,
+            TEST_PROJECT_ID,
             TEST_DECISION_ID,
             createdAt,
             resolvedAt,
@@ -131,7 +136,7 @@ class MetricsServiceTest {
 
         // Assert
         var snapshotCaptor = ArgumentCaptor.forClass(MetricSnapshot.class);
-        verify(snapshotRepository, times(2)).save(snapshotCaptor.capture());
+        verify(snapshotRepository, times(1)).save(snapshotCaptor.capture());
 
         var allSnapshots = snapshotCaptor.getAllValues();
         var dailySnapshot = allSnapshots.stream()
@@ -161,7 +166,7 @@ class MetricsServiceTest {
             .thenReturn(Optional.empty());
 
         // Act
-        metricsService.recordOutcomeValidated(TEST_TENANT_ID, TEST_OUTCOME_ID, createdAt, validatedAt);
+        metricsService.recordOutcomeValidated(TEST_TENANT_ID, TEST_PROJECT_ID, TEST_OUTCOME_ID, createdAt, validatedAt);
 
         // Assert
         var captor = ArgumentCaptor.forClass(MetricSnapshot.class);
@@ -197,7 +202,7 @@ class MetricsServiceTest {
             .thenReturn(Optional.of(existingSnapshot));
 
         // Act
-        metricsService.recordOutcomeValidated(TEST_TENANT_ID, TEST_OUTCOME_ID, createdAt, validatedAt);
+        metricsService.recordOutcomeValidated(TEST_TENANT_ID, TEST_PROJECT_ID, TEST_OUTCOME_ID, createdAt, validatedAt);
 
         // Assert
         var captor = ArgumentCaptor.forClass(MetricSnapshot.class);
@@ -230,7 +235,7 @@ class MetricsServiceTest {
             .thenReturn(Optional.of(existingSnapshot));
 
         // Act
-        metricsService.recordOutcomeInvalidated(TEST_TENANT_ID, TEST_OUTCOME_ID, createdAt, invalidatedAt);
+        metricsService.recordOutcomeInvalidated(TEST_TENANT_ID, TEST_PROJECT_ID, TEST_OUTCOME_ID, createdAt, invalidatedAt);
 
         // Assert
         var captor = ArgumentCaptor.forClass(MetricSnapshot.class);
@@ -255,7 +260,7 @@ class MetricsServiceTest {
             .thenReturn(Optional.empty());
 
         // Act
-        metricsService.recordOutcomeInvalidated(TEST_TENANT_ID, TEST_OUTCOME_ID, createdAt, invalidatedAt);
+        metricsService.recordOutcomeInvalidated(TEST_TENANT_ID, TEST_PROJECT_ID, TEST_OUTCOME_ID, createdAt, invalidatedAt);
 
         // Assert
         var captor = ArgumentCaptor.forClass(MetricSnapshot.class);
@@ -285,6 +290,7 @@ class MetricsServiceTest {
         // Act
         metricsService.recordHypothesisConcluded(
             TEST_TENANT_ID,
+            TEST_PROJECT_ID,
             TEST_HYPOTHESIS_ID,
             TEST_OUTCOME_ID,
             result,
@@ -330,6 +336,7 @@ class MetricsServiceTest {
         // Act
         metricsService.recordHypothesisConcluded(
             TEST_TENANT_ID,
+            TEST_PROJECT_ID,
             TEST_HYPOTHESIS_ID,
             TEST_OUTCOME_ID,
             result,
@@ -372,6 +379,7 @@ class MetricsServiceTest {
         // Act
         metricsService.recordHypothesisConcluded(
             TEST_TENANT_ID,
+            TEST_PROJECT_ID,
             TEST_HYPOTHESIS_ID,
             TEST_OUTCOME_ID,
             result,
@@ -402,14 +410,15 @@ class MetricsServiceTest {
             .wasEscalated(true)
             .build();
 
-        when(cycleLogRepository.findByTenantIdAndResolvedAtBetween(anyUUID(), any(Instant.class), any(Instant.class)))
+        when(cycleLogRepository.findByTenantIdAndResolvedAtBetween(any(UUID.class), any(Instant.class), any(Instant.class)))
             .thenReturn(List.of(existingLog));
-        when(snapshotRepository.findByTenantIdAndMetricTypeAndMetricDate(anyUUID(), anyString(), any(LocalDate.class)))
+        when(snapshotRepository.findByTenantIdAndMetricTypeAndMetricDate(any(UUID.class), anyString(), any(LocalDate.class)))
             .thenReturn(Optional.empty());
 
         // Act
         metricsService.recordDecisionResolved(
             TEST_TENANT_ID,
+            TEST_PROJECT_ID,
             TEST_DECISION_ID,
             createdAt,
             resolvedAt,
@@ -427,7 +436,7 @@ class MetricsServiceTest {
         assertThat(savedLog.getWasEscalated()).isTrue();
 
         var snapshotCaptor = ArgumentCaptor.forClass(MetricSnapshot.class);
-        verify(snapshotRepository, times(2)).save(snapshotCaptor.capture());
+        verify(snapshotRepository, times(1)).save(snapshotCaptor.capture());
 
         var dailySnapshot = snapshotCaptor.getAllValues().stream()
             .filter(s -> AppConstants.METRIC_DECISION_VELOCITY.equals(s.getMetricType()))

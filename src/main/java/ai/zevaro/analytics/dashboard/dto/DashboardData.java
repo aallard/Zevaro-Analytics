@@ -2,6 +2,7 @@ package ai.zevaro.analytics.dashboard.dto;
 
 import java.time.Instant;
 import java.util.List;
+import java.util.Map;
 
 public record DashboardData(
     // Summary cards
@@ -23,5 +24,26 @@ public record DashboardData(
     // Pipeline status
     String pipelineStatus,
     Instant lastDeployment,
-    long idleTimeMinutes
+    long idleTimeMinutes,
+
+    // v2: Workstreams
+    int totalWorkstreams,
+    int activeWorkstreams,
+    Map<String, Integer> workstreamsByMode,
+    Map<String, Integer> workstreamsByExecutionMode,
+
+    // v2: Specifications
+    int totalSpecifications,
+    int specificationsPendingReview,
+    int specificationsApprovedThisWeek,
+
+    // v2: Tickets
+    int totalTickets,
+    int openTickets,
+    Map<String, Integer> ticketsByStatus,
+    Map<String, Integer> ticketsBySeverity,
+
+    // v2: Documents
+    int totalDocuments,
+    int publishedDocuments
 ) {}

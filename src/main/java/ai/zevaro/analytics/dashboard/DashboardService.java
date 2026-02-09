@@ -15,6 +15,7 @@ import java.time.Instant;
 import java.time.LocalDate;
 import java.time.temporal.ChronoUnit;
 import java.util.*;
+import java.util.stream.Collectors;
 
 @Service
 @RequiredArgsConstructor
@@ -24,6 +25,7 @@ public class DashboardService {
     private final MetricSnapshotRepository snapshotRepository;
     private final DecisionCycleLogRepository cycleLogRepository;
     private final CoreServiceClient coreServiceClient;
+    private final AnalyticsEventRepository analyticsEventRepository;
 
     @Cacheable(value = AppConstants.CACHE_DASHBOARD, key = "#tenantId + ':' + #projectId")
     public DashboardData getDashboard(UUID tenantId, @Nullable UUID projectId) {
@@ -65,6 +67,85 @@ public class DashboardService {
         var activeExperiments = coreServiceClient.getActiveHypothesisCount(tenantId);
         var urgentDecisions = buildUrgentDecisionSummaries(tenantId);
 
+        // v2: Workstream counts from analytics events
+        var workstreamCreatedEvents = safeList(analyticsEventRepository.findByTenantIdAndEventTypeAndEventTimestampAfter(
+            tenantId, AppConstants.EVENT_WORKSTREAM_CREATED, Instant.EPOCH));
+        int totalWorkstreams = workstreamCreatedEvents.size();
+
+        var workstreamsByMode = new HashMap<String, Integer>();
+        var workstreamsByExecutionMode = new HashMap<String, Integer>();
+        for (var ws : workstreamCreatedEvents) {
+            var mode = getStringMeta(ws, "mode");
+            if (mode != null) workstreamsByMode.merge(mode, 1, Integer::sum);
+            var execMode = getStringMeta(ws, "executionMode");
+            if (execMode != null) workstreamsByExecutionMode.merge(execMode, 1, Integer::sum);
+        }
+
+        var workstreamStatusEvents = safeList(analyticsEventRepository.findByTenantIdAndEventTypeAndEventTimestampAfter(
+            tenantId, AppConstants.EVENT_WORKSTREAM_STATUS_CHANGED, Instant.EPOCH));
+        var terminalWorkstreams = new HashSet<UUID>();
+        var terminalStatuses = Set.of("COMPLETED", "ARCHIVED");
+        for (var event : workstreamStatusEvents) {
+            if (terminalStatuses.contains(getStringMeta(event, "newStatus"))) {
+                terminalWorkstreams.add(event.getEntityId());
+            } else {
+                terminalWorkstreams.remove(event.getEntityId());
+            }
+        }
+        int activeWorkstreams = totalWorkstreams - terminalWorkstreams.size();
+
+        // v2: Specification counts
+        var specCreatedEvents = safeList(analyticsEventRepository.findByTenantIdAndEventTypeAndEventTimestampAfter(
+            tenantId, AppConstants.EVENT_SPEC_CREATED, Instant.EPOCH));
+        int totalSpecifications = specCreatedEvents.size();
+
+        var specApprovedEvents = safeList(analyticsEventRepository.findByTenantIdAndEventTypeAndEventTimestampAfter(
+            tenantId, AppConstants.EVENT_SPEC_APPROVED, Instant.EPOCH));
+        var approvedSpecIds = specApprovedEvents.stream()
+            .map(AnalyticsEvent::getEntityId)
+            .collect(Collectors.toSet());
+
+        var specStatusEvents = safeList(analyticsEventRepository.findByTenantIdAndEventTypeAndEventTimestampAfter(
+            tenantId, AppConstants.EVENT_SPEC_STATUS_CHANGED, Instant.EPOCH));
+        var rejectedSpecIds = specStatusEvents.stream()
+            .filter(e -> "REJECTED".equals(getStringMeta(e, "newStatus")))
+            .map(AnalyticsEvent::getEntityId)
+            .collect(Collectors.toSet());
+
+        int specificationsPendingReview = (int) specCreatedEvents.stream()
+            .map(AnalyticsEvent::getEntityId)
+            .filter(id -> !approvedSpecIds.contains(id) && !rejectedSpecIds.contains(id))
+            .count();
+
+        var oneWeekAgo = now.minus(7, ChronoUnit.DAYS);
+        int specificationsApprovedThisWeek = (int) specApprovedEvents.stream()
+            .filter(e -> e.getEventTimestamp().isAfter(oneWeekAgo))
+            .count();
+
+        // v2: Ticket counts
+        var ticketCreatedEvents = safeList(analyticsEventRepository.findByTenantIdAndEventTypeAndEventTimestampAfter(
+            tenantId, AppConstants.EVENT_TICKET_CREATED, Instant.EPOCH));
+        int totalTickets = ticketCreatedEvents.size();
+
+        var ticketResolvedEvents = safeList(analyticsEventRepository.findByTenantIdAndEventTypeAndEventTimestampAfter(
+            tenantId, AppConstants.EVENT_TICKET_RESOLVED, Instant.EPOCH));
+        var resolvedTicketIds = ticketResolvedEvents.stream()
+            .map(AnalyticsEvent::getEntityId)
+            .collect(Collectors.toSet());
+
+        int openTickets = (int) ticketCreatedEvents.stream()
+            .map(AnalyticsEvent::getEntityId)
+            .filter(id -> !resolvedTicketIds.contains(id))
+            .count();
+
+        var ticketsByStatus = Map.of("OPEN", openTickets, "RESOLVED", resolvedTicketIds.size());
+
+        var ticketsBySeverity = new HashMap<String, Integer>();
+        for (var t : ticketCreatedEvents) {
+            var severity = getStringMeta(t, "severity");
+            if (severity != null) ticketsBySeverity.merge(severity, 1, Integer::sum);
+        }
+
         return new DashboardData(
             pendingDecisionCount,
             avgCycleTime != null ? avgCycleTime : 0.0,
@@ -78,7 +159,20 @@ public class DashboardService {
             leaderboard,
             "IDLE",  // pipelineStatus - requires Elaro integration (ZI-009)
             null,    // lastDeployment - requires Elaro integration (ZI-009)
-            0        // idleTimeMinutes - requires Elaro integration (ZI-009)
+            0,       // idleTimeMinutes - requires Elaro integration (ZI-009)
+            totalWorkstreams,
+            activeWorkstreams,
+            workstreamsByMode,
+            workstreamsByExecutionMode,
+            totalSpecifications,
+            specificationsPendingReview,
+            specificationsApprovedThisWeek,
+            totalTickets,
+            openTickets,
+            ticketsByStatus,
+            ticketsBySeverity,
+            0,   // totalDocuments - requires document consumer (ZI-TBD)
+            0    // publishedDocuments - requires document consumer (ZI-TBD)
         );
     }
 
@@ -184,5 +278,14 @@ public class DashboardService {
         if (avgCycleTime < 24) return "GREEN";
         if (avgCycleTime > 72) return "RED";
         return "YELLOW";
+    }
+
+    private String getStringMeta(AnalyticsEvent event, String key) {
+        if (event.getMetadata() == null || !event.getMetadata().containsKey(key)) return null;
+        return event.getMetadata().get(key).toString();
+    }
+
+    private <T> List<T> safeList(List<T> list) {
+        return list != null ? list : List.of();
     }
 }

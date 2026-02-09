@@ -10,7 +10,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
-import org.springframework.boot.test.mock.MockBean;
+import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 
@@ -54,8 +54,8 @@ class ReportControllerTest {
         LocalDate weekStart = LocalDate.of(2024, 1, 1);
         LocalDate weekEnd = LocalDate.of(2024, 1, 7);
         List<DataPoint> dailyVelocity = List.of(
-            new DataPoint("2024-01-01", 5),
-            new DataPoint("2024-01-02", 7)
+            new DataPoint(LocalDate.parse("2024-01-01"), 5.0),
+            new DataPoint(LocalDate.parse("2024-01-02"), 7.0)
         );
         List<String> topStakeholders = List.of("John Doe", "Jane Smith");
         List<String> highlights = List.of("Resolved 42 decisions", "Validated 3 outcomes");

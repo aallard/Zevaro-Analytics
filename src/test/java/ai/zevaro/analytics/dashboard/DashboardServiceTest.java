@@ -5,10 +5,12 @@ import ai.zevaro.analytics.client.dto.CoreDecisionSummary;
 import ai.zevaro.analytics.client.dto.CoreStakeholderInfo;
 import ai.zevaro.analytics.config.AppConstants;
 import ai.zevaro.analytics.dashboard.dto.DashboardData;
+import ai.zevaro.analytics.repository.AnalyticsEventRepository;
 import ai.zevaro.analytics.repository.DecisionCycleLog;
 import ai.zevaro.analytics.repository.DecisionCycleLogRepository;
 import ai.zevaro.analytics.repository.MetricSnapshot;
 import ai.zevaro.analytics.repository.MetricSnapshotRepository;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -39,6 +41,9 @@ class DashboardServiceTest {
     @Mock
     private CoreServiceClient coreServiceClient;
 
+    @Mock
+    private AnalyticsEventRepository analyticsEventRepository;
+
     @InjectMocks
     private DashboardService dashboardService;
 
@@ -46,14 +51,18 @@ class DashboardServiceTest {
     private static final UUID TEST_STAKEHOLDER_ID_1 = UUID.randomUUID();
     private static final UUID TEST_STAKEHOLDER_ID_2 = UUID.randomUUID();
 
+    @BeforeEach
+    void setUp() {
+        // Default stub for analytics event queries — returns empty lists
+        lenient().when(analyticsEventRepository.findByTenantIdAndEventTypeAndEventTimestampAfter(
+            any(UUID.class), anyString(), any(Instant.class)))
+            .thenReturn(List.of());
+    }
+
     @Test
     @DisplayName("getDashboard should aggregate data from repositories and CoreServiceClient")
     void testGetDashboard_AggregatesDataCorrectly() {
         // Arrange
-        var now = Instant.now();
-        var thirtyDaysAgo = now.minusSeconds(30 * 86400L);
-
-        // Mock repository data
         var decisionVelocitySnapshot = MetricSnapshot.builder()
             .metricType(AppConstants.METRIC_DECISION_VELOCITY)
             .metricDate(LocalDate.now())
@@ -74,13 +83,13 @@ class DashboardServiceTest {
             eq(TEST_TENANT_ID), eq(AppConstants.METRIC_OUTCOME_VELOCITY), any(LocalDate.class), any(LocalDate.class)))
             .thenReturn(List.of(outcomeVelocitySnapshot));
 
-        when(cycleLogRepository.findAvgCycleTimeSince(TEST_TENANT_ID, thirtyDaysAgo))
+        when(cycleLogRepository.findAvgCycleTimeSince(eq(TEST_TENANT_ID), any(Instant.class)))
             .thenReturn(22.5);
 
-        when(cycleLogRepository.countEscalatedSince(TEST_TENANT_ID, thirtyDaysAgo))
+        when(cycleLogRepository.countEscalatedSince(eq(TEST_TENANT_ID), any(Instant.class)))
             .thenReturn(3L);
 
-        when(cycleLogRepository.findAvgCycleTimeByStakeholder(TEST_TENANT_ID, thirtyDaysAgo))
+        when(cycleLogRepository.findAvgCycleTimeByStakeholder(eq(TEST_TENANT_ID), any(Instant.class)))
             .thenReturn(List.of(
                 new Object[]{TEST_STAKEHOLDER_ID_1, 15.0},
                 new Object[]{TEST_STAKEHOLDER_ID_2, 30.0}
@@ -131,18 +140,18 @@ class DashboardServiceTest {
             ));
 
         // Act
-        var dashboard = dashboardService.getDashboard(TEST_TENANT_ID);
+        var dashboard = dashboardService.getDashboard(TEST_TENANT_ID, null);
 
         // Assert
         assertThat(dashboard).isNotNull();
-        assertThat(dashboard.pendingDecisionCount()).isEqualTo(5);
-        assertThat(dashboard.avgCycleTimeHours()).isEqualTo(22.5);
-        assertThat(dashboard.outcomesThisWeek()).isEqualTo(8);
+        assertThat(dashboard.decisionsPendingCount()).isEqualTo(5);
+        assertThat(dashboard.avgDecisionWaitHours()).isEqualTo(22.5);
+        assertThat(dashboard.outcomesValidatedThisWeek()).isEqualTo(8);
         assertThat(dashboard.hypothesesTestedThisWeek()).isEqualTo(3);
-        assertThat(dashboard.activeExperiments()).isEqualTo(2);
-        assertThat(dashboard.healthStatus()).isEqualTo("YELLOW");
+        assertThat(dashboard.experimentsRunning()).isEqualTo(2);
+        assertThat(dashboard.decisionHealthStatus()).isEqualTo("GREEN");
         assertThat(dashboard.urgentDecisions()).hasSize(1);
-        assertThat(dashboard.leaderboard()).hasSize(2);
+        assertThat(dashboard.stakeholderLeaderboard()).hasSize(2);
         assertThat(dashboard.pipelineStatus()).isEqualTo("IDLE");
     }
 
@@ -150,9 +159,6 @@ class DashboardServiceTest {
     @DisplayName("getDashboard should return GREEN health status when average cycle time < 24 hours")
     void testGetDashboard_ReturnsGreenHealthStatus() {
         // Arrange
-        var now = Instant.now();
-        var thirtyDaysAgo = now.minusSeconds(30 * 86400L);
-
         var snapshot = MetricSnapshot.builder()
             .metricType(AppConstants.METRIC_DECISION_VELOCITY)
             .metricDate(LocalDate.now())
@@ -160,16 +166,16 @@ class DashboardServiceTest {
             .build();
 
         when(snapshotRepository.findByTenantIdAndMetricTypeAndMetricDateBetweenOrderByMetricDateAsc(
-            anyUUID(), anyString(), any(LocalDate.class), any(LocalDate.class)))
+            any(UUID.class), anyString(), any(LocalDate.class), any(LocalDate.class)))
             .thenReturn(List.of(snapshot));
 
-        when(cycleLogRepository.findAvgCycleTimeSince(TEST_TENANT_ID, thirtyDaysAgo))
+        when(cycleLogRepository.findAvgCycleTimeSince(eq(TEST_TENANT_ID), any(Instant.class)))
             .thenReturn(12.0); // Less than 24 hours
 
-        when(cycleLogRepository.countEscalatedSince(TEST_TENANT_ID, thirtyDaysAgo))
+        when(cycleLogRepository.countEscalatedSince(eq(TEST_TENANT_ID), any(Instant.class)))
             .thenReturn(1L);
 
-        when(cycleLogRepository.findAvgCycleTimeByStakeholder(TEST_TENANT_ID, thirtyDaysAgo))
+        when(cycleLogRepository.findAvgCycleTimeByStakeholder(eq(TEST_TENANT_ID), any(Instant.class)))
             .thenReturn(List.of());
 
         when(coreServiceClient.getPendingDecisionCount(TEST_TENANT_ID))
@@ -182,19 +188,16 @@ class DashboardServiceTest {
             .thenReturn(List.of());
 
         // Act
-        var dashboard = dashboardService.getDashboard(TEST_TENANT_ID);
+        var dashboard = dashboardService.getDashboard(TEST_TENANT_ID, null);
 
         // Assert
-        assertThat(dashboard.healthStatus()).isEqualTo("GREEN");
+        assertThat(dashboard.decisionHealthStatus()).isEqualTo("GREEN");
     }
 
     @Test
     @DisplayName("getDashboard should return RED health status when average cycle time > 72 hours")
     void testGetDashboard_ReturnsRedHealthStatus() {
         // Arrange
-        var now = Instant.now();
-        var thirtyDaysAgo = now.minusSeconds(30 * 86400L);
-
         var snapshot = MetricSnapshot.builder()
             .metricType(AppConstants.METRIC_DECISION_VELOCITY)
             .metricDate(LocalDate.now())
@@ -202,16 +205,16 @@ class DashboardServiceTest {
             .build();
 
         when(snapshotRepository.findByTenantIdAndMetricTypeAndMetricDateBetweenOrderByMetricDateAsc(
-            anyUUID(), anyString(), any(LocalDate.class), any(LocalDate.class)))
+            any(UUID.class), anyString(), any(LocalDate.class), any(LocalDate.class)))
             .thenReturn(List.of(snapshot));
 
-        when(cycleLogRepository.findAvgCycleTimeSince(TEST_TENANT_ID, thirtyDaysAgo))
+        when(cycleLogRepository.findAvgCycleTimeSince(eq(TEST_TENANT_ID), any(Instant.class)))
             .thenReturn(96.0); // Greater than 72 hours
 
-        when(cycleLogRepository.countEscalatedSince(TEST_TENANT_ID, thirtyDaysAgo))
+        when(cycleLogRepository.countEscalatedSince(eq(TEST_TENANT_ID), any(Instant.class)))
             .thenReturn(5L);
 
-        when(cycleLogRepository.findAvgCycleTimeByStakeholder(TEST_TENANT_ID, thirtyDaysAgo))
+        when(cycleLogRepository.findAvgCycleTimeByStakeholder(eq(TEST_TENANT_ID), any(Instant.class)))
             .thenReturn(List.of());
 
         when(coreServiceClient.getPendingDecisionCount(TEST_TENANT_ID))
@@ -224,26 +227,24 @@ class DashboardServiceTest {
             .thenReturn(List.of());
 
         // Act
-        var dashboard = dashboardService.getDashboard(TEST_TENANT_ID);
+        var dashboard = dashboardService.getDashboard(TEST_TENANT_ID, null);
 
         // Assert
-        assertThat(dashboard.healthStatus()).isEqualTo("RED");
+        assertThat(dashboard.decisionHealthStatus()).isEqualTo("RED");
     }
 
     @Test
     @DisplayName("getDashboardSummary should include average cycle time and health status")
     void testGetDashboardSummary_IncludesAverageTimeAndHealth() {
         // Arrange
-        var thirtyDaysAgo = Instant.now().minusSeconds(30 * 86400L);
-
-        when(cycleLogRepository.findAvgCycleTimeSince(TEST_TENANT_ID, thirtyDaysAgo))
+        when(cycleLogRepository.findAvgCycleTimeSince(eq(TEST_TENANT_ID), any(Instant.class)))
             .thenReturn(18.5);
 
         when(coreServiceClient.getPendingDecisionCount(TEST_TENANT_ID))
             .thenReturn(4);
 
         // Act
-        var summary = dashboardService.getDashboardSummary(TEST_TENANT_ID);
+        var summary = dashboardService.getDashboardSummary(TEST_TENANT_ID, null);
 
         // Assert
         assertThat(summary).isNotNull();
@@ -257,16 +258,14 @@ class DashboardServiceTest {
     @DisplayName("getDashboardSummary should handle null average cycle time")
     void testGetDashboardSummary_HandlesNullAverageCycleTime() {
         // Arrange
-        var thirtyDaysAgo = Instant.now().minusSeconds(30 * 86400L);
-
-        when(cycleLogRepository.findAvgCycleTimeSince(TEST_TENANT_ID, thirtyDaysAgo))
+        when(cycleLogRepository.findAvgCycleTimeSince(eq(TEST_TENANT_ID), any(Instant.class)))
             .thenReturn(null);
 
         when(coreServiceClient.getPendingDecisionCount(TEST_TENANT_ID))
             .thenReturn(0);
 
         // Act
-        var summary = dashboardService.getDashboardSummary(TEST_TENANT_ID);
+        var summary = dashboardService.getDashboardSummary(TEST_TENANT_ID, null);
 
         // Assert
         assertThat(summary).isNotNull();
@@ -279,20 +278,17 @@ class DashboardServiceTest {
     @DisplayName("getDashboard should handle empty stakeholder leaderboard")
     void testGetDashboard_HandlesEmptyLeaderboard() {
         // Arrange
-        var now = Instant.now();
-        var thirtyDaysAgo = now.minusSeconds(30 * 86400L);
-
         when(snapshotRepository.findByTenantIdAndMetricTypeAndMetricDateBetweenOrderByMetricDateAsc(
-            anyUUID(), anyString(), any(LocalDate.class), any(LocalDate.class)))
+            any(UUID.class), anyString(), any(LocalDate.class), any(LocalDate.class)))
             .thenReturn(List.of());
 
-        when(cycleLogRepository.findAvgCycleTimeSince(TEST_TENANT_ID, thirtyDaysAgo))
+        when(cycleLogRepository.findAvgCycleTimeSince(eq(TEST_TENANT_ID), any(Instant.class)))
             .thenReturn(null);
 
-        when(cycleLogRepository.countEscalatedSince(TEST_TENANT_ID, thirtyDaysAgo))
+        when(cycleLogRepository.countEscalatedSince(eq(TEST_TENANT_ID), any(Instant.class)))
             .thenReturn(0L);
 
-        when(cycleLogRepository.findAvgCycleTimeByStakeholder(TEST_TENANT_ID, thirtyDaysAgo))
+        when(cycleLogRepository.findAvgCycleTimeByStakeholder(eq(TEST_TENANT_ID), any(Instant.class)))
             .thenReturn(List.of());
 
         when(coreServiceClient.getPendingDecisionCount(TEST_TENANT_ID))
@@ -305,12 +301,12 @@ class DashboardServiceTest {
             .thenReturn(List.of());
 
         // Act
-        var dashboard = dashboardService.getDashboard(TEST_TENANT_ID);
+        var dashboard = dashboardService.getDashboard(TEST_TENANT_ID, null);
 
         // Assert
         assertThat(dashboard).isNotNull();
-        assertThat(dashboard.leaderboard()).isEmpty();
-        assertThat(dashboard.avgCycleTimeHours()).isZero();
+        assertThat(dashboard.stakeholderLeaderboard()).isEmpty();
+        assertThat(dashboard.avgDecisionWaitHours()).isZero();
     }
 
     @Test
@@ -318,21 +314,20 @@ class DashboardServiceTest {
     void testGetDashboard_PopulatesUrgentDecisions() {
         // Arrange
         var now = Instant.now();
-        var thirtyDaysAgo = now.minusSeconds(30 * 86400L);
         var decisionId = UUID.randomUUID();
         var ownerId = UUID.randomUUID();
 
         when(snapshotRepository.findByTenantIdAndMetricTypeAndMetricDateBetweenOrderByMetricDateAsc(
-            anyUUID(), anyString(), any(LocalDate.class), any(LocalDate.class)))
+            any(UUID.class), anyString(), any(LocalDate.class), any(LocalDate.class)))
             .thenReturn(List.of());
 
-        when(cycleLogRepository.findAvgCycleTimeSince(TEST_TENANT_ID, thirtyDaysAgo))
+        when(cycleLogRepository.findAvgCycleTimeSince(eq(TEST_TENANT_ID), any(Instant.class)))
             .thenReturn(20.0);
 
-        when(cycleLogRepository.countEscalatedSince(TEST_TENANT_ID, thirtyDaysAgo))
+        when(cycleLogRepository.countEscalatedSince(eq(TEST_TENANT_ID), any(Instant.class)))
             .thenReturn(1L);
 
-        when(cycleLogRepository.findAvgCycleTimeByStakeholder(TEST_TENANT_ID, thirtyDaysAgo))
+        when(cycleLogRepository.findAvgCycleTimeByStakeholder(eq(TEST_TENANT_ID), any(Instant.class)))
             .thenReturn(List.of());
 
         var urgentDecision = new CoreDecisionSummary(
@@ -356,7 +351,7 @@ class DashboardServiceTest {
             .thenReturn(List.of(urgentDecision));
 
         // Act
-        var dashboard = dashboardService.getDashboard(TEST_TENANT_ID);
+        var dashboard = dashboardService.getDashboard(TEST_TENANT_ID, null);
 
         // Assert
         assertThat(dashboard.urgentDecisions()).hasSize(1);
@@ -364,7 +359,7 @@ class DashboardServiceTest {
         assertThat(firstUrgent.title()).isEqualTo("Critical System Update");
         assertThat(firstUrgent.priority()).isEqualTo("BLOCKING");
         assertThat(firstUrgent.ownerName()).isEqualTo("Jane Smith");
-        assertThat(firstUrgent.hoursOpen()).isEqualTo(2);
+        assertThat(firstUrgent.waitingHours()).isEqualTo(2);
         assertThat(firstUrgent.blockedItemsCount()).isEqualTo(3);
     }
 
@@ -372,9 +367,6 @@ class DashboardServiceTest {
     @DisplayName("getDashboard should calculate outcomes from velocity snapshots")
     void testGetDashboard_CalculatesOutcomesFromSnapshots() {
         // Arrange
-        var now = Instant.now();
-        var thirtyDaysAgo = now.minusSeconds(30 * 86400L);
-
         var outcomeSnapshot1 = MetricSnapshot.builder()
             .metricType(AppConstants.METRIC_OUTCOME_VELOCITY)
             .metricDate(LocalDate.now().minusDays(3))
@@ -401,13 +393,13 @@ class DashboardServiceTest {
             eq(TEST_TENANT_ID), eq(AppConstants.METRIC_OUTCOME_VELOCITY), any(LocalDate.class), any(LocalDate.class)))
             .thenReturn(List.of(outcomeSnapshot1, outcomeSnapshot2, outcomeSnapshot3));
 
-        when(cycleLogRepository.findAvgCycleTimeSince(TEST_TENANT_ID, thirtyDaysAgo))
+        when(cycleLogRepository.findAvgCycleTimeSince(eq(TEST_TENANT_ID), any(Instant.class)))
             .thenReturn(25.0);
 
-        when(cycleLogRepository.countEscalatedSince(TEST_TENANT_ID, thirtyDaysAgo))
+        when(cycleLogRepository.countEscalatedSince(eq(TEST_TENANT_ID), any(Instant.class)))
             .thenReturn(2L);
 
-        when(cycleLogRepository.findAvgCycleTimeByStakeholder(TEST_TENANT_ID, thirtyDaysAgo))
+        when(cycleLogRepository.findAvgCycleTimeByStakeholder(eq(TEST_TENANT_ID), any(Instant.class)))
             .thenReturn(List.of());
 
         when(coreServiceClient.getPendingDecisionCount(TEST_TENANT_ID))
@@ -420,9 +412,9 @@ class DashboardServiceTest {
             .thenReturn(List.of());
 
         // Act
-        var dashboard = dashboardService.getDashboard(TEST_TENANT_ID);
+        var dashboard = dashboardService.getDashboard(TEST_TENANT_ID, null);
 
         // Assert
-        assertThat(dashboard.outcomesThisWeek()).isEqualTo(10); // 5 + 3 + 2
+        assertThat(dashboard.outcomesValidatedThisWeek()).isEqualTo(10); // 5 + 3 + 2
     }
 }

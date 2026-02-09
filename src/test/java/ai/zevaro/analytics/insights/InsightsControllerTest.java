@@ -9,7 +9,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
-import org.springframework.boot.test.mock.MockBean;
+import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 
@@ -49,18 +49,18 @@ class InsightsControllerTest {
         // Setup insights
         insights = List.of(
             new Insight(
-                UUID.randomUUID(),
-                InsightType.OPPORTUNITY,
+                InsightType.TREND,
                 "High decision velocity detected",
                 "Your team is resolving decisions 20% faster than last week",
+                "Keep up the momentum. Consider sharing best practices across teams.",
                 0.85,
                 Instant.now()
             ),
             new Insight(
-                UUID.randomUUID(),
-                InsightType.WARNING,
+                InsightType.BOTTLENECK,
                 "Escalation rate increasing",
                 "Escalation rate has increased to 25% from 15%",
+                "Review escalation policies and stakeholder availability.",
                 0.65,
                 Instant.now()
             )
@@ -72,13 +72,15 @@ class InsightsControllerTest {
                 "Decision Velocity",
                 TrendDirection.UP,
                 12.5,
-                "Last 7 days"
+                30,
+                true
             ),
             new Trend(
                 "Outcome Validation Rate",
                 TrendDirection.DOWN,
                 -5.2,
-                "Last 7 days"
+                30,
+                true
             )
         );
 
@@ -93,24 +95,24 @@ class InsightsControllerTest {
     @Test
     @DisplayName("GET /api/v1/insights should return List of insights with 200 OK")
     void testGetInsights_ShouldReturn200WithInsightsList() throws Exception {
-        when(insightsService.generateInsights(tenantId)).thenReturn(insights);
+        when(insightsService.generateInsights(tenantId, null)).thenReturn(insights);
 
         mockMvc.perform(get("/api/v1/insights")
                 .header("X-Tenant-Id", tenantId.toString())
                 .contentType(MediaType.APPLICATION_JSON))
             .andExpect(status().isOk())
             .andExpect(jsonPath("$", hasSize(2)))
-            .andExpect(jsonPath("$[0].type", is("OPPORTUNITY")))
+            .andExpect(jsonPath("$[0].type", is("TREND")))
             .andExpect(jsonPath("$[0].title", is("High decision velocity detected")))
             .andExpect(jsonPath("$[0].description", containsString("20%")))
-            .andExpect(jsonPath("$[1].type", is("WARNING")))
+            .andExpect(jsonPath("$[1].type", is("BOTTLENECK")))
             .andExpect(jsonPath("$[1].confidence", is(0.65)));
     }
 
     @Test
     @DisplayName("GET /api/v1/insights should return empty list when no insights")
     void testGetInsights_ShouldReturnEmptyListWhenNoInsights() throws Exception {
-        when(insightsService.generateInsights(any(UUID.class))).thenReturn(List.of());
+        when(insightsService.generateInsights(any(UUID.class), any())).thenReturn(List.of());
 
         mockMvc.perform(get("/api/v1/insights")
                 .header("X-Tenant-Id", tenantId.toString()))
@@ -121,12 +123,11 @@ class InsightsControllerTest {
     @Test
     @DisplayName("GET /api/v1/insights should include all insight fields")
     void testGetInsights_ShouldIncludeAllInsightFields() throws Exception {
-        when(insightsService.generateInsights(any(UUID.class))).thenReturn(insights);
+        when(insightsService.generateInsights(any(UUID.class), any())).thenReturn(insights);
 
         mockMvc.perform(get("/api/v1/insights")
                 .header("X-Tenant-Id", tenantId.toString()))
             .andExpect(status().isOk())
-            .andExpect(jsonPath("$[0].id", notNullValue()))
             .andExpect(jsonPath("$[0].type", notNullValue()))
             .andExpect(jsonPath("$[0].title", notNullValue()))
             .andExpect(jsonPath("$[0].description", notNullValue()))
@@ -138,7 +139,7 @@ class InsightsControllerTest {
     @DisplayName("GET /api/v1/insights should pass tenantId to service")
     void testGetInsights_ShouldPassTenantIdToService() throws Exception {
         UUID testTenantId = UUID.randomUUID();
-        when(insightsService.generateInsights(testTenantId)).thenReturn(insights);
+        when(insightsService.generateInsights(testTenantId, null)).thenReturn(insights);
 
         mockMvc.perform(get("/api/v1/insights")
                 .header("X-Tenant-Id", testTenantId.toString()))
@@ -149,25 +150,25 @@ class InsightsControllerTest {
     @Test
     @DisplayName("GET /api/v1/insights/trends should return List of trends with 200 OK")
     void testGetTrends_ShouldReturn200WithTrendsList() throws Exception {
-        when(insightsService.detectTrends(tenantId)).thenReturn(trends);
+        when(insightsService.detectTrends(tenantId, null)).thenReturn(trends);
 
         mockMvc.perform(get("/api/v1/insights/trends")
                 .header("X-Tenant-Id", tenantId.toString())
                 .contentType(MediaType.APPLICATION_JSON))
             .andExpect(status().isOk())
             .andExpect(jsonPath("$", hasSize(2)))
-            .andExpect(jsonPath("$[0].name", is("Decision Velocity")))
+            .andExpect(jsonPath("$[0].metricName", is("Decision Velocity")))
             .andExpect(jsonPath("$[0].direction", is("UP")))
-            .andExpect(jsonPath("$[0].changePercent", is(12.5)))
-            .andExpect(jsonPath("$[1].name", is("Outcome Validation Rate")))
+            .andExpect(jsonPath("$[0].percentChange", is(12.5)))
+            .andExpect(jsonPath("$[1].metricName", is("Outcome Validation Rate")))
             .andExpect(jsonPath("$[1].direction", is("DOWN")))
-            .andExpect(jsonPath("$[1].changePercent", is(-5.2)));
+            .andExpect(jsonPath("$[1].percentChange", is(-5.2)));
     }
 
     @Test
     @DisplayName("GET /api/v1/insights/trends should return empty list when no trends")
     void testGetTrends_ShouldReturnEmptyListWhenNoTrends() throws Exception {
-        when(insightsService.detectTrends(any(UUID.class))).thenReturn(List.of());
+        when(insightsService.detectTrends(any(UUID.class), any())).thenReturn(List.of());
 
         mockMvc.perform(get("/api/v1/insights/trends")
                 .header("X-Tenant-Id", tenantId.toString()))
@@ -178,21 +179,21 @@ class InsightsControllerTest {
     @Test
     @DisplayName("GET /api/v1/insights/trends should include all trend fields")
     void testGetTrends_ShouldIncludeAllTrendFields() throws Exception {
-        when(insightsService.detectTrends(any(UUID.class))).thenReturn(trends);
+        when(insightsService.detectTrends(any(UUID.class), any())).thenReturn(trends);
 
         mockMvc.perform(get("/api/v1/insights/trends")
                 .header("X-Tenant-Id", tenantId.toString()))
             .andExpect(status().isOk())
-            .andExpect(jsonPath("$[0].name", notNullValue()))
+            .andExpect(jsonPath("$[0].metricName", notNullValue()))
             .andExpect(jsonPath("$[0].direction", notNullValue()))
-            .andExpect(jsonPath("$[0].changePercent", notNullValue()))
-            .andExpect(jsonPath("$[0].timePeriod", notNullValue()));
+            .andExpect(jsonPath("$[0].percentChange", notNullValue()))
+            .andExpect(jsonPath("$[0].periodDays", notNullValue()));
     }
 
     @Test
     @DisplayName("GET /api/v1/insights/trends should include direction as enum")
     void testGetTrends_ShouldIncludeDirectionAsEnum() throws Exception {
-        when(insightsService.detectTrends(any(UUID.class))).thenReturn(trends);
+        when(insightsService.detectTrends(any(UUID.class), any())).thenReturn(trends);
 
         mockMvc.perform(get("/api/v1/insights/trends")
                 .header("X-Tenant-Id", tenantId.toString()))
@@ -204,7 +205,7 @@ class InsightsControllerTest {
     @Test
     @DisplayName("GET /api/v1/insights/recommendations should return List of recommendations with 200 OK")
     void testGetRecommendations_ShouldReturn200WithRecommendationsList() throws Exception {
-        when(insightsService.getRecommendations(tenantId)).thenReturn(recommendations);
+        when(insightsService.getRecommendations(tenantId, null)).thenReturn(recommendations);
 
         mockMvc.perform(get("/api/v1/insights/recommendations")
                 .header("X-Tenant-Id", tenantId.toString())
@@ -219,7 +220,7 @@ class InsightsControllerTest {
     @Test
     @DisplayName("GET /api/v1/insights/recommendations should return empty list when no recommendations")
     void testGetRecommendations_ShouldReturnEmptyListWhenNoRecommendations() throws Exception {
-        when(insightsService.getRecommendations(any(UUID.class))).thenReturn(List.of());
+        when(insightsService.getRecommendations(any(UUID.class), any())).thenReturn(List.of());
 
         mockMvc.perform(get("/api/v1/insights/recommendations")
                 .header("X-Tenant-Id", tenantId.toString()))
@@ -230,7 +231,7 @@ class InsightsControllerTest {
     @Test
     @DisplayName("GET /api/v1/insights/recommendations should return strings")
     void testGetRecommendations_ShouldReturnStrings() throws Exception {
-        when(insightsService.getRecommendations(any(UUID.class))).thenReturn(recommendations);
+        when(insightsService.getRecommendations(any(UUID.class), any())).thenReturn(recommendations);
 
         mockMvc.perform(get("/api/v1/insights/recommendations")
                 .header("X-Tenant-Id", tenantId.toString()))
@@ -244,7 +245,7 @@ class InsightsControllerTest {
     @DisplayName("GET /api/v1/insights/recommendations should pass tenantId to service")
     void testGetRecommendations_ShouldPassTenantIdToService() throws Exception {
         UUID testTenantId = UUID.randomUUID();
-        when(insightsService.getRecommendations(testTenantId)).thenReturn(recommendations);
+        when(insightsService.getRecommendations(testTenantId, null)).thenReturn(recommendations);
 
         mockMvc.perform(get("/api/v1/insights/recommendations")
                 .header("X-Tenant-Id", testTenantId.toString()))
@@ -256,7 +257,7 @@ class InsightsControllerTest {
     @DisplayName("GET /api/v1/insights/trends should pass tenantId to service")
     void testGetTrends_ShouldPassTenantIdToService() throws Exception {
         UUID testTenantId = UUID.randomUUID();
-        when(insightsService.detectTrends(testTenantId)).thenReturn(trends);
+        when(insightsService.detectTrends(testTenantId, null)).thenReturn(trends);
 
         mockMvc.perform(get("/api/v1/insights/trends")
                 .header("X-Tenant-Id", testTenantId.toString()))

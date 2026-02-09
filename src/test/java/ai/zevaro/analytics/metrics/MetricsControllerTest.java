@@ -4,6 +4,7 @@ import ai.zevaro.analytics.client.CoreServiceClient;
 import ai.zevaro.analytics.metrics.dto.DecisionVelocityMetric;
 import ai.zevaro.analytics.metrics.dto.HypothesisThroughputMetric;
 import ai.zevaro.analytics.metrics.dto.StakeholderResponseMetric;
+import ai.zevaro.analytics.repository.AnalyticsEventRepository;
 import ai.zevaro.analytics.repository.DecisionCycleLogRepository;
 import ai.zevaro.analytics.repository.MetricSnapshotRepository;
 import org.junit.jupiter.api.BeforeEach;
@@ -11,7 +12,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
-import org.springframework.boot.test.mock.MockBean;
+import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 
@@ -44,6 +45,9 @@ class MetricsControllerTest {
 
     @MockBean
     private DecisionCycleLogRepository decisionCycleLogRepository;
+
+    @MockBean
+    private AnalyticsEventRepository analyticsEventRepository;
 
     @MockBean
     private CoreServiceClient coreServiceClient;
@@ -303,6 +307,6 @@ class MetricsControllerTest {
             .thenReturn(List.of());
 
         mockMvc.perform(get("/api/v1/metrics/decision-velocity"))
-            .andExpect(status().isOk());
+            .andExpect(status().isBadRequest());
     }
 }
